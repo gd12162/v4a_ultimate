@@ -1,6 +1,5 @@
-// PWA v6: UI-only changes; keep connection/paths same
+// v6-hotfix: remove duplicate const that broke JS; UI-only edits
 (() => {
-
   const tabs = document.querySelectorAll('header .tabs button');
   const pages = document.querySelectorAll('.page');
   tabs.forEach(btn => btn.addEventListener('click', () => {
@@ -48,7 +47,7 @@
   const completedHeaderD = $('completedHeaderD');
   const completedTitle = $('completedTitle');
   const startDate = $('startDate');
-  const coverFile = $('coverFile');
+  const coverFile = $('coverFile'); // single declaration
   const useDday = $('useDday');
   const todayD = $('todayD');
   const currentCycleN = $('currentCycleN');
@@ -122,6 +121,7 @@
     }
   }
   quickCat.addEventListener('change', updateParentSubSelect);
+
   $('quickAdd').addEventListener('click', () => {
     const cat = quickCat.value;
     const type = quickType.value;
@@ -295,46 +295,6 @@
     }
   }
 
-  function renderOverview() {
-    const wrap = document.getElementById('overviewTree');
-    wrap.innerHTML = '';
-    for (const cat of FIXED_CATS) {
-      const catBox = document.createElement('div');
-      catBox.className = 'category';
-      const head = document.createElement('div');
-      head.className = 'cat-head';
-      head.innerHTML = `<h3>${cat}</h3>`;
-      catBox.appendChild(head);
-      const inlineWrap = document.createElement('div');
-      inlineWrap.className = 'subtopics inline';
-      const subs = state.items.filter(x => x.cat===cat && x.type==='sub');
-      for (const st of subs) {
-        const chip = document.createElement('span');
-        chip.className = 'subtopic chip';
-        chip.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}`;
-        inlineWrap.appendChild(chip);
-      }
-      catBox.appendChild(inlineWrap);
-      for (const st of subs) {
-        const goalsUnder = state.items.filter(x => x.cat===cat && x.type==='goal' && x.parentId===st.id);
-        for (const g of goalsUnder) {
-          const row = document.createElement('div');
-          row.className = 'goal sub-goal-indent';
-          row.innerHTML = `<div class="badge">목표</div> ${g.title}`;
-          catBox.appendChild(row);
-        }
-      }
-      const goals = state.items.filter(x => x.cat===cat && x.type==='goal' && !x.parentId);
-      for (const g of goals) {
-        const row = document.createElement('div');
-        row.className = 'goal';
-        row.innerHTML = `<div class="badge">목표</div> ${g.title}`;
-        catBox.appendChild(row);
-      }
-      wrap.appendChild(catBox);
-    }
-  }
-
   $('saveBase').addEventListener('click', () => {
     state.config.startDate = startDate.value || '';
     state.config.useDday = !!useDday.checked;
@@ -376,7 +336,6 @@
       state = load(); renderAll(); alert('가져오기 완료');
     } catch(e) { alert('JSON 파싱 실패'); }
   });
-  const coverFile = document.getElementById('coverFile');
   coverFile.addEventListener('change', async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;

@@ -1,4 +1,4 @@
-// Offline cache for app shell (GitHub Pages friendly)
+// Offline cache for app shell
 const CACHE = '100days-v6';
 const APP_SHELL = [
   './',
