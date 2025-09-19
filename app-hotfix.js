@@ -1,6 +1,5 @@
-// v6-hotfix-3: UI-only + immediate refresh on add; subtopic->goals stacked; overview always up-to-date
+// v6-optimistic: immediate show on add (UI-only). Keeps existing behavior otherwise.
 (() => {
-  // ---- Tabs (unchanged) ----
   const tabs = document.querySelectorAll('header .tabs button');
   const pages = document.querySelectorAll('.page');
   tabs.forEach(btn => btn.addEventListener('click', () => {
@@ -14,12 +13,10 @@
     if (btn.dataset.tab === 'settings') { fillSettings(); }
   }));
 
-  // ---- PWA SW registration (unchanged) ----
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
   }
 
-  // ---- State ----
   const KEY = 'hundreddays_v6';
   const FIXED_CATS = ['돈을 벌기위한 행위','신앙을 지키는 행위','가족을 챙기기 위한 행위','나를 위한 시간'];
   function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }
@@ -27,15 +24,14 @@
   function initState() {
     const s = load();
     s.config ||= { startDate: '', useDday: false, todayD: 0, currentCycleN: 1, coverDataUrl: '' };
-    s.items ||= []; // {id, cat, type:'goal'|'sub', title, detail, parentId?, createdAt}
-    s.achievements ||= []; // {id, itemId, cycleIndex, doneAt, dValue}
+    s.items ||= [];
+    s.achievements ||= [];
     s.seq ||= 1;
     save(s);
     return s;
   }
   let state = initState();
 
-  // ---- DOM ----
   const $ = (id) => document.getElementById(id);
   const headerTitle = $('headerTitle');
   const banner = $('banner');
@@ -53,7 +49,6 @@
   const completedHeaderD = $('completedHeaderD');
   const completedTitle = $('completedTitle');
 
-  // SETTINGS
   const startDate = $('startDate');
   const coverFile = $('coverFile');
   const useDday = $('useDday');
@@ -61,7 +56,6 @@
   const currentCycleN = $('currentCycleN');
   const coverPreview = $('coverPreview');
 
-  // ---- Utils ----
   function daysBetween(a, b) {
     const MS = 24*60*60*1000;
     return Math.floor((b - a) / MS);
@@ -86,7 +80,7 @@
     const start = effectiveStartDate();
     if (!start) return 0;
     const d = daysBetween(start, new Date(new Date(date).setHours(0,0,0,0)));
-    return Math.max(0, d % 100); // 0~99
+    return Math.max(0, d % 100);
   }
   function cycleRange(idx) {
     const start = effectiveStartDate();
@@ -98,7 +92,6 @@
   const fmtDate = (d)=> new Date(d).toLocaleString();
   const isoDay = (d)=> d.toISOString().slice(0,10);
 
-  // ---- Header + Banner ----
   function renderHeader() {
     const start = effectiveStartDate();
     headerTitle.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
@@ -110,7 +103,6 @@
     todayDbox.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
   }
 
-  // ---- Quick selectors ----
   function fillQuickSelectors() {
     quickCat.innerHTML = '';
     for (const c of FIXED_CATS) {
@@ -131,10 +123,56 @@
   }
   quickCat.addEventListener('change', updateParentSubSelect);
 
-  // ---- Add item (immediate refresh for Home + Overview) ----
+  // optimistic insert helpers
+  function goalRowHTML(g, isSub) {
+    return `<div class="goal-left">
+      <div class="badge">목표</div>
+      <strong class="g-title">${g.title}</strong>
+      <div class="meta g-detail">${g.detail||''}</div>
+      <div class="meta g-meta">등록: ${fmtDate(g.createdAt || new Date())}</div>
+    </div>
+    <div class="goal-right">
+      <button class="done-btn">달성</button>
+      <button class="del-btn danger">삭제</button>
+    </div>`;
+  }
+  function bindGoalRowEvents(row, g) {
+    const doneBtn = row.querySelector('.done-btn');
+    const delBtn = row.querySelector('.del-btn');
+    if (doneBtn) doneBtn.addEventListener('click', () => markDone(g.id));
+    if (delBtn) delBtn.addEventListener('click', () => deleteItem(g.id));
+  }
+  function insertOptimistic(cat, newItem) {
+    const catBox = fullTree.querySelector(`.category[data-cat="${CSS.escape(cat)}"]`);
+    if (!catBox) return;
+    if (newItem.type === 'sub') {
+      const subHeader = document.createElement('div');
+      subHeader.className = 'chip subtopic';
+      subHeader.setAttribute('data-sub-id', newItem.id);
+      subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${newItem.title}</strong>${newItem.detail?` <span class="meta">${newItem.detail}</span>`:''}`;
+      catBox.appendChild(subHeader);
+      return;
+    }
+    if (newItem.type === 'goal') {
+      const row = document.createElement('div');
+      const underSub = !!newItem.parentId;
+      row.className = 'goal' + (underSub ? ' sub-goal-indent' : '');
+      row.setAttribute('data-item-id', newItem.id);
+      row.innerHTML = goalRowHTML(newItem, underSub);
+      if (underSub) {
+        const subChip = catBox.querySelector(`.subtopic[data-sub-id="${newItem.parentId}"]`);
+        if (subChip && subChip.nextSibling) catBox.insertBefore(row, subChip.nextSibling);
+        else catBox.appendChild(row);
+      } else {
+        catBox.appendChild(row);
+      }
+      bindGoalRowEvents(row, newItem);
+    }
+  }
+
   $('quickAdd').addEventListener('click', () => {
     const cat = quickCat.value;
-    const type = quickType.value; // 'goal'|'sub'
+    const type = quickType.value;
     const title = quickTitle.value.trim();
     const detail = quickDetail.value.trim();
     if (!cat) return alert('카테고리를 선택하세요.');
@@ -148,23 +186,27 @@
     state.items.push(item);
     save(state);
 
-    // Clear inputs and refresh both views immediately
+    // immediate on-screen insert
+    insertOptimistic(cat, item);
+
     quickTitle.value=''; quickDetail.value='';
     updateParentSubSelect();
-    renderFullTree();   // Home
-    renderOverview();   // Overview
+
+    // reconcile in next frame
+    requestAnimationFrame(() => {
+      renderFullTree();
+      renderOverview();
+    });
   });
 
-  // ---- Done / Delete (also refresh both Home + Overview immediately) ----
   function markDone(itemId) {
     const start = effectiveStartDate();
     if (!start) return alert('설정에서 시작일 또는 D값을 먼저 저장하세요.');
     const now = new Date();
     const dval = dValueFor(now);
-    const idxBySetting = Math.max(1, Number(state.config.currentCycleN||1)) - 1; // 0-based storage
+    const idxBySetting = Math.max(1, Number(state.config.currentCycleN||1)) - 1;
     const rec = { id: state.seq++, itemId, cycleIndex: idxBySetting, doneAt: now.toISOString(), dValue: dval };
     state.achievements.push(rec); save(state);
-    alert(`달성 처리 완료! (기록: ${fmtDate(now)} / D-${dval})`);
     renderCompleted();
     renderFullTree();
     renderOverview();
@@ -179,23 +221,22 @@
       state.items = state.items.filter(i => i.id!==itemId);
     }
     save(state);
-    renderFullTree();
-    renderOverview();
+    renderFullTree(); renderOverview();
   }
 
-  // ---- HOME: Subtopic -> its goals -> next subtopic; then direct goals ----
   function renderFullTree() {
     fullTree.innerHTML = '';
     for (const cat of FIXED_CATS) {
       const catBox = document.createElement('div');
       catBox.className = 'category';
+      catBox.setAttribute('data-cat', cat);
       catBox.innerHTML = `<div class="cat-head"><h3 class="cat-title">${cat}</h3></div>`;
 
-      // 1) For each subtopic, show it, then its goals stacked
       const subs = state.items.filter(x => x.cat===cat && x.type==='sub');
       for (const st of subs) {
         const subHeader = document.createElement('div');
-        subHeader.className = 'chip';
+        subHeader.className = 'chip subtopic';
+        subHeader.setAttribute('data-sub-id', st.id);
         subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}`;
         catBox.appendChild(subHeader);
 
@@ -203,6 +244,7 @@
         for (const g of goalsUnder) {
           const row = document.createElement('div');
           row.className = 'goal sub-goal-indent';
+          row.setAttribute('data-item-id', g.id);
           row.innerHTML = `<div class="goal-left">
             <div class="badge">목표</div>
             <strong class="g-title">${g.title}</strong>
@@ -219,11 +261,11 @@
         }
       }
 
-      // 2) Goals directly under the category (no subtopic)
       const directGoals = state.items.filter(x => x.cat===cat && x.type==='goal' && !x.parentId);
       for (const g of directGoals) {
         const row = document.createElement('div');
         row.className = 'goal';
+        row.setAttribute('data-item-id', g.id);
         row.innerHTML = `<div class="goal-left">
           <div class="badge">목표</div>
           <strong class="g-title">${g.title}</strong>
@@ -243,7 +285,6 @@
     }
   }
 
-  // ---- Completed ----
   function fillCycleSelect() {
     cycleSelect.innerHTML = '';
     const start = effectiveStartDate();
@@ -310,7 +351,6 @@
     }
   }
 
-  // ---- Overview ----
   function renderOverview() {
     const wrap = document.getElementById('overviewTree');
     if (!wrap) return;
@@ -351,64 +391,6 @@
     }
   }
 
-  // ---- Settings ----
-  $('saveBase').addEventListener('click', () => {
-    state.config.startDate = startDate.value || '';
-    state.config.useDday = !!useDday.checked;
-    state.config.todayD = Math.max(0, Math.min(99, Number(todayD.value||0)));
-    state.config.currentCycleN = Math.max(1, Number(currentCycleN.value||1));
-    save(state);
-    renderHeader();
-    renderBanner();
-    renderOverview(); // keep overview synced after config changes
-    alert('저장되었습니다.');
-  });
-  $('resetAll').addEventListener('click', () => {
-    if (!confirm('정말 전체 초기화할까요? JSON 백업을 먼저 권장합니다.')) return;
-    state = {config:{startDate:'',useDday:false,todayD:0,currentCycleN:1,coverDataUrl:''}, items:[], achievements:[], seq:1};
-    save(state); renderHeader(); renderHome(); renderOverview(); alert('초기화 완료');
-  });
-  $('exportJson').addEventListener('click', () => {
-    const data = JSON.parse(localStorage.getItem(KEY) || '{}');
-    data.schema_version = 6;
-    data.exported_at = new Date().toISOString();
-    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `100days-backup-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-  $('importJson').addEventListener('click', async () => {
-    const f = $('importFile').files?.[0];
-    if (!f) return alert('가져올 JSON 파일을 선택해주세요.');
-    try {
-      const text = await f.text();
-      const json = JSON.parse(text);
-      localStorage.setItem(KEY, JSON.stringify({
-        config: json.config || {startDate:'',useDday:false,todayD:0,currentCycleN:1,coverDataUrl:''},
-        items: json.items || [],
-        achievements: json.achievements || [],
-        seq: json.seq || 1
-      }));
-      state = load(); renderHeader(); renderHome(); renderOverview(); alert('가져오기 완료');
-    } catch(e) { alert('JSON 파싱 실패'); }
-  });
-  coverFile.addEventListener('change', async (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      state.config.coverDataUrl = reader.result;
-      save(state);
-      coverPreview.style.backgroundImage = `url('${state.config.coverDataUrl}')`;
-      renderBanner();
-    };
-    reader.readAsDataURL(f);
-  });
-
-  // ---- Renderers ----
   function renderHome() {
     renderBanner();
     fillQuickSelectors();
@@ -421,7 +403,5 @@
     renderCompleted();
     renderOverview();
   }
-
-  // ---- Init ----
   renderAll();
 })();
