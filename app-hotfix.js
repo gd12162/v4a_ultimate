@@ -1,5 +1,6 @@
-// v6-optimistic: immediate show on add (UI-only). Keeps existing behavior otherwise.
+// v6-optimistic+subdel+fit: minimal UI patches only
 (() => {
+  // ---- Tabs (unchanged) ----
   const tabs = document.querySelectorAll('header .tabs button');
   const pages = document.querySelectorAll('.page');
   tabs.forEach(btn => btn.addEventListener('click', () => {
@@ -13,10 +14,12 @@
     if (btn.dataset.tab === 'settings') { fillSettings(); }
   }));
 
+  // ---- SW (unchanged) ----
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
   }
 
+  // ---- State ----
   const KEY = 'hundreddays_v6';
   const FIXED_CATS = ['돈을 벌기위한 행위','신앙을 지키는 행위','가족을 챙기기 위한 행위','나를 위한 시간'];
   function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }
@@ -32,23 +35,21 @@
   }
   let state = initState();
 
+  // ---- DOM ----
   const $ = (id) => document.getElementById(id);
   const headerTitle = $('headerTitle');
   const banner = $('banner');
   const todayDbox = $('todayDbox');
   const fullTree = $('fullTree');
-
   const quickCat = $('quickCat');
   const quickType = $('quickType');
   const quickTitle = $('quickTitle');
   const quickDetail = $('quickDetail');
   const quickParent = $('quickParent');
-
   const cycleSelect = $('cycleSelect');
   const completedList = $('completedList');
   const completedHeaderD = $('completedHeaderD');
   const completedTitle = $('completedTitle');
-
   const startDate = $('startDate');
   const coverFile = $('coverFile');
   const useDday = $('useDday');
@@ -56,6 +57,7 @@
   const currentCycleN = $('currentCycleN');
   const coverPreview = $('coverPreview');
 
+  // ---- Utils ----
   function daysBetween(a, b) {
     const MS = 24*60*60*1000;
     return Math.floor((b - a) / MS);
@@ -92,6 +94,7 @@
   const fmtDate = (d)=> new Date(d).toLocaleString();
   const isoDay = (d)=> d.toISOString().slice(0,10);
 
+  // ---- Header + Banner ----
   function renderHeader() {
     const start = effectiveStartDate();
     headerTitle.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
@@ -99,10 +102,15 @@
   function renderBanner() {
     const dataUrl = state.config.coverDataUrl || '';
     banner.style.backgroundImage = dataUrl ? `url('${dataUrl}')` : 'none';
+    // Fit whole image (no cropping) WITHOUT touching CSS file
+    banner.style.backgroundSize = 'contain';
+    banner.style.backgroundPosition = 'center';
+    banner.style.backgroundRepeat = 'no-repeat';
     const start = effectiveStartDate();
     todayDbox.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
   }
 
+  // ---- Quick selectors ----
   function fillQuickSelectors() {
     quickCat.innerHTML = '';
     for (const c of FIXED_CATS) {
@@ -123,7 +131,7 @@
   }
   quickCat.addEventListener('change', updateParentSubSelect);
 
-  // optimistic insert helpers
+  // ---- Optimistic helpers ----
   function goalRowHTML(g, isSub) {
     return `<div class="goal-left">
       <div class="badge">목표</div>
@@ -149,7 +157,9 @@
       const subHeader = document.createElement('div');
       subHeader.className = 'chip subtopic';
       subHeader.setAttribute('data-sub-id', newItem.id);
-      subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${newItem.title}</strong>${newItem.detail?` <span class="meta">${newItem.detail}</span>`:''}`;
+      subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${newItem.title}</strong>${newItem.detail?` <span class="meta">${newItem.detail}</span>`:''}
+        <button class="del-sub danger" style="margin-left:6px">삭제</button>`;
+      subHeader.querySelector('.del-sub').addEventListener('click', () => deleteItem(newItem.id));
       catBox.appendChild(subHeader);
       return;
     }
@@ -170,6 +180,7 @@
     }
   }
 
+  // ---- Add (immediate show) ----
   $('quickAdd').addEventListener('click', () => {
     const cat = quickCat.value;
     const type = quickType.value;
@@ -186,19 +197,18 @@
     state.items.push(item);
     save(state);
 
-    // immediate on-screen insert
     insertOptimistic(cat, item);
 
     quickTitle.value=''; quickDetail.value='';
     updateParentSubSelect();
 
-    // reconcile in next frame
     requestAnimationFrame(() => {
       renderFullTree();
       renderOverview();
     });
   });
 
+  // ---- Done / Delete ----
   function markDone(itemId) {
     const start = effectiveStartDate();
     if (!start) return alert('설정에서 시작일 또는 D값을 먼저 저장하세요.');
@@ -214,16 +224,18 @@
   function deleteItem(itemId) {
     const item = state.items.find(i=>i.id===itemId);
     if (!item) return;
-    if (!confirm(`정말 "${item.title}"을(를) 삭제할까요?`)) return;
+    if (!confirm(`정말 "${item.title}"을(를) 삭제할까요? 소주제를 삭제하면 하위 목표도 함께 삭제됩니다.`)) return;
     if (item.type==='sub') {
       state.items = state.items.filter(i => !(i.id===itemId || i.parentId===itemId));
     } else {
       state.items = state.items.filter(i => i.id!==itemId);
     }
     save(state);
-    renderFullTree(); renderOverview();
+    renderFullTree();
+    renderOverview();
   }
 
+  // ---- HOME render (with subtopic delete button) ----
   function renderFullTree() {
     fullTree.innerHTML = '';
     for (const cat of FIXED_CATS) {
@@ -237,7 +249,9 @@
         const subHeader = document.createElement('div');
         subHeader.className = 'chip subtopic';
         subHeader.setAttribute('data-sub-id', st.id);
-        subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}`;
+        subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}
+          <button class="del-sub danger" style="margin-left:6px">삭제</button>`;
+        subHeader.querySelector('.del-sub').addEventListener('click', () => deleteItem(st.id));
         catBox.appendChild(subHeader);
 
         const goalsUnder = state.items.filter(x => x.cat===cat && x.type==='goal' && x.parentId===st.id);
@@ -285,6 +299,7 @@
     }
   }
 
+  // ---- Completed (unchanged) ----
   function fillCycleSelect() {
     cycleSelect.innerHTML = '';
     const start = effectiveStartDate();
@@ -302,9 +317,9 @@
   }
   function updateCompletedHeader() {
     const dval = effectiveStartDate() ? dValueFor(new Date()) : '??';
-    const n = Math.max(1, Number(state.config.currentCycleN||1));
-    completedHeaderD.textContent = `D-${dval} (${n}번째 100일)`;
-    completedTitle.textContent = `사이클별 완료기록 (${n}번째)`;
+    an = Math.max(1, Number(state.config.currentCycleN||1));
+    completedHeaderD.textContent = `D-${dval} (${an}번째 100일)`;
+    completedTitle.textContent = `사이클별 완료기록 (${an}번째)`;
   }
   function renderCompleted() {
     updateCompletedHeader();
@@ -351,6 +366,7 @@
     }
   }
 
+  // ---- Overview (ensure render; unchanged structure) ----
   function renderOverview() {
     const wrap = document.getElementById('overviewTree');
     if (!wrap) return;
@@ -391,6 +407,7 @@
     }
   }
 
+  // ---- Home + All ----
   function renderHome() {
     renderBanner();
     fillQuickSelectors();
