@@ -4,141 +4,40 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>D-트래커</title>
-  <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#0b5fff">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" sizes="192x192">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <h1 id="headerTitle">D-??</h1>
-    <nav class="tabs">
-      <button data-tab="home" class="active">홈</button>
-      <button data-tab="completed">완료 기록</button>
-      <button data-tab="overview">진행 현황</button>
-      <button data-tab="settings">설정</button>
-    </nav>
+  <header class="topbar">
+    <h1>D-트래커</h1>
+    <div class="version">버전: <span id="appVersion"></span></div>
   </header>
 
-  <main>
-    <section id="page-home" class="page active">
-      <section class="card banner-card">
-        <div id="banner" class="banner"></div>
-        <div id="todayDbox" class="todayD center">D-??</div>
-      </section>
-
-      <section class="card">
-        <h2>전체 구조</h2>
-        <div id="fullTree"></div>
-      </section>
-
-      <section class="card">
-        <h2>빠른 추가</h2>
-        <div class="row">
-          <label>카테고리
-            <select id="quickCat"></select>
-          </label>
-          <label>타입
-            <select id="quickType">
-              <option value="goal">목표</option>
-              <option value="sub">소주제</option>
-            </select>
-          </label>
-        </div>
-        <div class="row">
-          <label>제목
-            <input id="quickTitle" placeholder="예: 3km 러닝 20회 / '운동'">
-          </label>
-          <label>설명(선택)
-            <input id="quickDetail" placeholder="간단 설명">
-          </label>
-          <label>상위 소주제(선택)
-            <select id="quickParent"><option value="">(카테고리 직속)</option></select>
-          </label>
-        </div>
-        <div class="row"><button id="quickAdd">추가</button></div>
-      </section>
+  <main class="container">
+    <section class="card">
+      <h2>설정</h2>
+      <div class="form-row">
+        <label for="darkMode">다크 모드</label>
+        <input type="checkbox" id="darkMode" />
+      </div>
+      <button id="saveSettings" class="btn">설정 적용</button>
+      <p class="hint">저장 시 "설정이 적용되었습니다" 메시지가 표시됩니다.</p>
     </section>
 
-    <section id="page-completed" class="page">
-      <section class="card">
-        <div class="row between">
-          <h2 id="completedTitle">사이클별 완료기록</h2>
-          <div id="completedHeaderD" class="badge"></div>
-        </div>
-        <div class="row">
-          <label>사이클 선택
-            <select id="cycleSelect"></select>
-          </label>
-          <button id="refreshCycles">새로고침</button>
-        </div>
-        <div id="completedList"></div>
-      </section>
-    </section>
-
-    <section id="page-overview" class="page">
-      <section class="card">
-        <h2>진행 현황</h2>
-        <div id="overviewTree" class="overview"></div>
-      </section>
-    </section>
-
-    <section id="page-settings" class="page">
-      <section class="card">
-        <h2>베이스 설정</h2>
-        <div class="row">
-          <label>시작일(고정)
-            <input type="date" id="startDate">
-          </label>
-          <label>대표 이미지(앨범에서 선택)
-            <input type="file" id="coverFile" accept="image/*">
-          </label>
-        </div>
-        <div class="row">
-          <label class="toggle">
-            <input type="checkbox" id="useDday"> D-값으로 계산(오늘 기준 진행일로 계산)
-          </label>
-          <label>오늘의 D값(0~99) <span class="meta">예: 96 → 오늘이 D-96</span>
-            <input type="number" id="todayD" min="0" max="99" value="0">
-          </label>
-          <label>현재 사이클 번호(n)
-            <input type="number" id="currentCycleN" min="1" value="1">
-          </label>
-        </div>
-        <div class="row">
-          <button id="saveBase">설정 저장</button>
-          <button id="resetAll" class="danger">전체 초기화(백업 권장)</button>
-        </div>
-        <div id="coverPreview" class="cover"></div>
-      </section>
-
-      <section class="card">
-        <h2>백업/복원</h2>
-        <div class="row">
-          <button id="exportJson">JSON 내보내기</button>
-          <input type="file" id="importFile" accept="application/json">
-          <button id="importJson">가져오기</button>
-        </div>
-      </section>
+    <section class="card">
+      <h2>상태</h2>
+      <ul>
+        <li>PWA 설치 지원: <strong id="pwaSupported">확인 중…</strong></li>
+        <li>서비스 워커: <strong id="swStatus">확인 중…</strong></li>
+      </ul>
     </section>
   </main>
 
-  <template id="tpl-goal">
-    <div class="goal">
-      <div class="goal-left">
-        <div class="badge">목표</div>
-        <strong class="g-title"></strong>
-        <div class="meta g-detail"></div>
-        <div class="meta g-meta"></div>
-      </div>
-      <div class="goal-right">
-        <button class="done-btn">달성</button>
-        <button class="del-btn danger">삭제</button>
-      </div>
-    </div>
-  </template>
+  <div id="toast" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="app.js"></script>
+  <script defer src="app.js"></script>
 </body>
 </html>

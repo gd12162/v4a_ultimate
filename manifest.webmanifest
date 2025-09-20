@@ -1,9 +1,11 @@
 {
   "name": "D-트래커",
   "short_name": "D-트래커",
-  "start_url": "./",
+  "lang": "ko",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
-  "background_color": "#0b1220",
+  "background_color": "#0b111b",
   "theme_color": "#0b5fff",
   "icons": [
     {
