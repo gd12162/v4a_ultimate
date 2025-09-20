@@ -7,7 +7,9 @@
   <meta name="theme-color" content="#0b5fff">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png" sizes="192x192">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -16,24 +18,15 @@
     <div class="version">버전: <span id="appVersion"></span></div>
   </header>
 
-  <main class="container">
-    <section class="card">
-      <h2>설정</h2>
-      <div class="form-row">
-        <label for="darkMode">다크 모드</label>
-        <input type="checkbox" id="darkMode" />
-      </div>
-      <button id="saveSettings" class="btn">설정 적용</button>
-      <p class="hint">저장 시 "설정이 적용되었습니다" 메시지가 표시됩니다.</p>
-    </section>
+  <nav class="tabs">
+    <button class="tab" data-page="home">홈</button>
+    <button class="tab" data-page="history">완료기록</button>
+    <button class="tab" data-page="progress">진행현황</button>
+    <button class="tab" data-page="settings">설정</button>
+  </nav>
 
-    <section class="card">
-      <h2>상태</h2>
-      <ul>
-        <li>PWA 설치 지원: <strong id="pwaSupported">확인 중…</strong></li>
-        <li>서비스 워커: <strong id="swStatus">확인 중…</strong></li>
-      </ul>
-    </section>
+  <main class="container">
+    <section id="view"></section>
   </main>
 
   <div id="toast" aria-live="polite" aria-atomic="true"></div>

@@ -1,11 +1,11 @@
-/* sw.js - v7.0.0-2025-09-20 */
+/* sw.js - v7.1.0-2025-09-20 */
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
   }
 });
 
-const SW_VERSION = "v7.0.0-2025-09-20";
+const SW_VERSION = "v7.1.0-2025-09-20";
 const CACHE_NAME = "app-cache-" + SW_VERSION;
 const ASSETS = [
   "./",
@@ -13,6 +13,7 @@ const ASSETS = [
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
+  "./icons/icon-180.png",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./offline.html"
@@ -42,12 +43,10 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
-  // Navigation: Network first, fallback to cache, then offline page
   if (isNavigationalRequest(req)) {
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
-        // Optionally: update cache with fresh page
         const cache = await caches.open(CACHE_NAME);
         cache.put(req, fresh.clone());
         return fresh;
@@ -59,11 +58,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets: Cache first, then network, and update cache in background
   event.respondWith((async () => {
     const cached = await caches.match(req);
     if (cached) {
-      // Revalidate in background (non-blocking)
       event.waitUntil((async () => {
         try {
           const fresh = await fetch(req);
