@@ -15,17 +15,19 @@
 <body>
   <header class="topbar">
     <h1>D-트래커</h1>
-    <div class="version">버전: <span id="appVersion"></span></div>
+    <!-- 버전표시는 요구에 따라 완전히 제거 -->
   </header>
 
   <nav class="tabs">
     <button class="tab" data-page="home">홈</button>
+    <button class="tab" data-page="quickadd">소주제/목표 추가</button>
     <button class="tab" data-page="history">완료기록</button>
     <button class="tab" data-page="progress">진행현황</button>
     <button class="tab" data-page="settings">설정</button>
   </nav>
 
   <main class="container">
+    <!-- SPA: 탭별 화면을 JS가 이 #view 안에 그립니다 -->
     <section id="view"></section>
   </main>
 
