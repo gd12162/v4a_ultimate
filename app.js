@@ -176,7 +176,7 @@
   }
   function insertOptimistic(cat, newItem) {
     const catBox = findCatBoxByAttr(cat);
-    if (!catBox) return; // 안전장치: 필요 시 전체 렌더로 대체
+    if (!catBox) return false; // 컨테이너 없으면 호출 측에서 전체 렌더
 
     if (newItem.type === 'sub') {
       const subHeader = document.createElement('div');
@@ -201,7 +201,7 @@
       if (delBtn) delBtn.addEventListener('click', function(){ deleteItem(newItem.id); renderHome(); });
 
       catBox.appendChild(subHeader);
-      return;
+      return true;
     }
 
     if (newItem.type === 'goal') {
@@ -229,7 +229,10 @@
         catBox.appendChild(row);
       }
       bindGoalRowEvents(row, newItem.id);
+      return true;
     }
+
+    return false;
   }
 
   // ---------- Pages ----------
@@ -348,19 +351,20 @@
       if (!title){ toast('제목을 입력하세요.'); return; }
 
       if (type==='sub'){
-        const it = addSub({cat:cat, title:title, detail:detail});
-        insertOptimistic(cat, it);       // 즉시 DOM 삽입
+        const it = addSub({cat:cat, title:title, detail:detail});  // 상태 저장
+        const ok = insertOptimistic(cat, it);                       // 즉시 DOM 삽입
         toast('소주제가 추가되었습니다.');
-        refreshParentOptions();          // 부모 드롭다운 즉시 갱신
+        refreshParentOptions();                                     // 부모 드롭다운 즉시 갱신
+        if (!ok) { requestAnimationFrame(renderHome); } else { requestAnimationFrame(renderHome); }
       } else {
         const pid = quickParent.value ? Number(quickParent.value) : null;
         const it = addGoal({cat:cat, parentId:pid, title:title, detail:detail});
-        insertOptimistic(cat, it);       // 즉시 DOM 삽입
+        const ok = insertOptimistic(cat, it);
         toast('목표가 추가되었습니다.');
+        if (!ok) { requestAnimationFrame(renderHome); } else { requestAnimationFrame(renderHome); }
       }
 
       quickTitle.value=''; quickDetail.value='';
-      // 필요시 완전 재렌더: requestAnimationFrame(function(){ renderHome(); });
     });
   }
 
