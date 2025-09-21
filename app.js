@@ -1,8 +1,4 @@
-// D-Tracker v6 — 4탭 고정 + 홈 하단 입력칸 포함 버전
-// - 홈: 배너(설정 이미지), 중앙 D-day 표시, 전체구조(보기) + 하단에 "소주제/목표 추가" 폼
-// - 완료기록: 카테고리/소주제 트리 아래에 완료 누른 순서대로 기록
-// - 진행현황: 읽기전용 구조
-// - 설정: 이미지 업로드 + 오늘 기준 D값, 저장 시 토스트
+// D-Tracker v6 — 기존 HTML/CSS 그대로 동작 + 홈 하단 입력칸 + 카테고리 라벨 자동 마이그레이션 + 카드 래핑
 (() => {
   // ---- State ----
   const KEY = 'hundreddays_v6';
@@ -16,9 +12,25 @@
     s.items ||= [];        // {id, cat, type:'sub'|'goal', title, detail?, parentId?, createdAt}
     s.achievements ||= []; // {id, itemId, doneAt, dValue}
     s.seq ||= 1;
-    save(s); return s;
+    save(s);
+    return s;
   }
   let state = initState();
+
+  // ---- Category label migration (1회 정규화) ----
+  (function normalizeOldCategories(){
+    const map = {
+      '돈을 벌기위한 행위': '돈을 버는 행위',
+      '신앙을 지키는 행위': '영성 유지를 위한 행위',
+      '가족을 챙기기 위한 행위': '가족을 위한 행위',
+      '나를 위한 시간': '나를 위한 시간'
+    };
+    let changed = false;
+    for (const it of state.items || []) {
+      if (map[it.cat]) { it.cat = map[it.cat]; changed = true; }
+    }
+    if (changed) save(state);
+  })();
 
   // ---- DOM helpers ----
   const $ = (sel, root=document)=>root.querySelector(sel);
@@ -26,7 +38,7 @@
   const view = $('#view');
   const toastBox = $('#toast');
 
-  // 요구: 상단 버전표시 제거 (HTML 손대지 않아도 됨)
+  // 상단 버전표시 제거(HTML은 그대로 두고 JS에서 숨김)
   $('.topbar .version')?.remove();
 
   // ---- Tabs ----
@@ -128,31 +140,32 @@
       </div>
     </div>`;
 
-  // ---- Page: Home (구조 + 하단 입력칸) ----
+  // ---- Page: Home (구조 + 하단 입력칸 / 카드 래핑) ----
   function renderHome(){
     const d = Number(state.config.todayD||0);
     const bannerStyle = state.config.coverDataUrl
       ? `style="background-image:url('${state.config.coverDataUrl}');background-size:cover;background-position:center;background-repeat:no-repeat;"`
       : '';
-    // 구조 + 입력칸
     let html = `
       <section class="page page-home">
         <div id="banner" ${bannerStyle}></div>
         <div id="todayDbox" class="center-d">D-${d}</div>
 
-        <div id="fullTree">
-          ${CATS.map(cat=>{
-            const subs=state.items.filter(x=>x.cat===cat && x.type==='sub');
-            const directGoals=state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
-            return `<div class="category" data-cat="${cat}">
-              ${catHead(cat)}
-              ${subs.map(st=>{
-                const goalsUnder=state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
-                return `${subChipHTML(st)}${goalsUnder.map(g=>goalRowHTML(g,true)).join('')}`;
-              }).join('')}
-              ${directGoals.map(g=>goalRowHTML(g,false)).join('')}
-            </div>`;
-          }).join('')}
+        <div class="card">
+          <div id="fullTree">
+            ${CATS.map(cat=>{
+              const subs=state.items.filter(x=>x.cat===cat && x.type==='sub');
+              const directGoals=state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
+              return `<div class="category" data-cat="${cat}">
+                ${catHead(cat)}
+                ${subs.map(st=>{
+                  const goalsUnder=state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
+                  return `${subChipHTML(st)}${goalsUnder.map(g=>goalRowHTML(g,true)).join('')}`;
+                }).join('')}
+                ${directGoals.map(g=>goalRowHTML(g,false)).join('')}
+              </div>`;
+            }).join('')}
+          </div>
         </div>
 
         <div class="card" id="homeQuickAdd">
@@ -231,13 +244,13 @@
         addGoal({cat,parentId:pid,title,detail});
         toast('목표가 추가되었습니다.');
       }
-      // 낙관적 반영: 입력만 비우고 트리 재렌더
+      // 낙관적 반영: 입력 초기화 + 홈만 재렌더
       quickTitle.value=''; quickDetail.value='';
-      renderHome(); // 홈만 새로 그림(현재 탭 유지)
+      renderHome();
     });
   }
 
-  // ---- Page: History (완료기록) ----
+  // ---- Page: History (완료기록 / 카드 래핑) ----
   function renderHistory(){
     const itemMap = Object.fromEntries(state.items.map(i=>[i.id,i]));
     const rows = [...state.achievements].sort((a,b)=> new Date(a.doneAt)-new Date(b.doneAt));
@@ -249,7 +262,7 @@
       grouped[cat][subId].push({title:it.title, doneAt:rec.doneAt, dValue:rec.dValue});
     }
 
-    let html = `<section class="page page-history"><h2>완료기록</h2>`;
+    let html = `<section class="page page-history"><div class="card"><h2>완료기록</h2>`;
     html += CATS.map(cat=>{
       const g=grouped[cat]||{}; const keys=Object.keys(g);
       if(!keys.length){
@@ -274,13 +287,13 @@
       }).join('');
       return `<div class="category" data-cat="${cat}">${catHead(cat)}${blocks}</div>`;
     }).join('');
-    html += `</section>`;
+    html += `</div></section>`;
     view.innerHTML = html;
   }
 
-  // ---- Page: Progress (읽기전용) ----
+  // ---- Page: Progress (읽기전용 / 카드 래핑) ----
   function renderProgress(){
-    let html = `<section class="page page-progress"><h2>진행현황</h2>`;
+    let html = `<section class="page page-progress"><div class="card"><h2>진행현황</h2>`;
     html += CATS.map(cat=>{
       const subs=state.items.filter(x=>x.cat===cat && x.type==='sub');
       const directGoals=state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
@@ -296,7 +309,7 @@
         ${directGoals.map(g=>goalRowReadOnly(g,false)).join('')}
       </div>`;
     }).join('');
-    html += `</section>`;
+    html += `</div></section>`;
     view.innerHTML = html;
   }
 
@@ -305,18 +318,20 @@
     const d = Number(state.config.todayD||0);
     let html = `
       <section class="page page-settings">
-        <h2>설정</h2>
-        <div class="form-grid">
-          <label>메인 배너 이미지
-            <input id="coverFile" type="file" accept="image/*">
-          </label>
-          <div class="imgBox">
-            <img id="coverPreview" alt="미리보기" style="display:${state.config.coverDataUrl?'block':'none'}" />
+        <div class="card">
+          <h2>설정</h2>
+          <div class="form-grid">
+            <label>메인 배너 이미지
+              <input id="coverFile" type="file" accept="image/*">
+            </label>
+            <div class="imgBox">
+              <img id="coverPreview" alt="미리보기" style="display:${state.config.coverDataUrl?'block':'none'}" />
+            </div>
+            <label>오늘 기준 D-값
+              <input id="todayD" type="number" min="0" max="99" value="${d}">
+            </label>
+            <div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>
           </div>
-          <label>오늘 기준 D-값
-            <input id="todayD" type="number" min="0" max="99" value="${d}">
-          </label>
-          <div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>
         </div>
       </section>`;
     view.innerHTML = html;
