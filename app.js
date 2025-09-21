@@ -1,8 +1,8 @@
-// D-Tracker v6 — 기존 HTML/CSS 세트 맞춤: 홈 하단 입력칸 + 라벨 자동복구 + 스타일 유지
+// D-Tracker v6 — 홈 하단 즉시 반영(낙관적 렌더링) + 라벨 자동복구 + 기존 HTML/CSS 호환
 (() => {
   // ---------- State ----------
   const KEY = 'hundreddays_v6';
-  // 기존 데이터 보존을 위해 ‘예전 라벨’ 고정
+  // 기존 데이터 보존: ‘예전 라벨’ 고정
   const CATS = ['돈을 벌기위한 행위','신앙을 지키는 행위','가족을 챙기기 위한 행위','나를 위한 시간'];
 
   function load(){ try{ return JSON.parse(localStorage.getItem(KEY))||{} }catch{ return {} } }
@@ -19,7 +19,7 @@
   }
   let state = initState();
 
-  // ---------- (중요) 새라벨 → 옛라벨 자동 정규화 (기존 데이터 그대로 보이게) ----------
+  // ---------- 새라벨 → 옛라벨 자동 정규화 (혼용 방지) ----------
   (function normalizeCats(){
     const toOld = {
       '돈을 버는 행위': '돈을 벌기위한 행위',
@@ -43,9 +43,9 @@
 
   // ---------- Tabs ----------
   let currentPage = 'home';
-  $all('.tabs .tab').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      $all('.tabs .tab').forEach(b=>b.classList.remove('active'));
+  $all('.tabs .tab').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      $all('.tabs .tab').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
       currentPage = btn.getAttribute('data-page');
       render();
@@ -60,149 +60,238 @@
   function pad2(n){ return String(n).padStart(2,'0'); }
   function fmtDate(d){
     const t = new Date(d);
-    return `${t.getFullYear()}-${pad2(t.getMonth()+1)}-${pad2(t.getDate())} ${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
+    return t.getFullYear()+'-'+pad2(t.getMonth()+1)+'-'+pad2(t.getDate())+' '+pad2(t.getHours())+':'+pad2(t.getMinutes());
   }
   function nowISO(){ return new Date().toISOString(); }
   function toast(msg){
     if (!toastBox){ alert(msg); return; }
     toastBox.textContent = msg;
     toastBox.classList.add('show');
-    setTimeout(()=>toastBox.classList.remove('show'),1500);
+    setTimeout(function(){ toastBox.classList.remove('show'); }, 1500);
   }
   function escapeHTML(s){
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+    });
   }
 
   // ---------- Data ops ----------
-  function addSub({cat,title,detail}){
-    const it={id:state.seq++,cat,type:'sub',title,detail:detail||'',createdAt:nowISO()};
+  function addSub(obj){
+    const it = { id: state.seq++, cat: obj.cat, type:'sub', title: obj.title, detail: obj.detail||'', createdAt: nowISO() };
     state.items.push(it); save(state); return it;
   }
-  function addGoal({cat,parentId,title,detail}){
-    const it={id:state.seq++,cat,type:'goal',parentId:parentId||null,title,detail:detail||'',createdAt:nowISO()};
+  function addGoal(obj){
+    const it = { id: state.seq++, cat: obj.cat, type:'goal', parentId: obj.parentId||null, title: obj.title, detail: obj.detail||'', createdAt: nowISO() };
     state.items.push(it); save(state); return it;
   }
-  function editSub(subId,newTitle){
-    const it = state.items.find(x=>x.id===subId && x.type==='sub'); if(!it) return;
-    it.title = String(newTitle||'').trim(); save(state);
+  function editSub(subId, newTitle){
+    const it = state.items.find(function(x){ return x.id===subId && x.type==='sub'; });
+    if (!it) return;
+    it.title = String(newTitle||'').trim();
+    save(state);
   }
   function deleteItem(itemId){
-    const target = state.items.find(x=>x.id===itemId); if(!target) return;
-    if (!confirm(`정말 "${target.title}"을(를) 삭제할까요? 소주제를 삭제하면 하위 목표도 함께 삭제됩니다.`)) return;
+    const target = state.items.find(function(x){ return x.id===itemId; });
+    if (!target) return;
+    if (!confirm('정말 "'+target.title+'"을(를) 삭제할까요? 소주제를 삭제하면 하위 목표도 함께 삭제됩니다.')) return;
 
     let removedIds = [];
     if (target.type==='sub'){
-      removedIds = state.items.filter(i=>i.id===itemId || i.parentId===itemId).map(i=>i.id);
-      state.items = state.items.filter(i=>!(i.id===itemId || i.parentId===itemId));
+      removedIds = state.items.filter(function(i){ return i.id===itemId || i.parentId===itemId; }).map(function(i){ return i.id; });
+      state.items = state.items.filter(function(i){ return !(i.id===itemId || i.parentId===itemId); });
     } else {
       removedIds = [itemId];
-      state.items = state.items.filter(i=>i.id!==itemId);
+      state.items = state.items.filter(function(i){ return i.id!==itemId; });
     }
-    state.achievements = state.achievements.filter(a=>removedIds.indexOf(a.itemId)===-1);
+    // 고아 완료기록 제거
+    state.achievements = state.achievements.filter(function(a){ return removedIds.indexOf(a.itemId)===-1; });
     save(state);
   }
   function completeGoal(itemId){
-    const it = state.items.find(x=>x.id===itemId && x.type==='goal'); if(!it) return;
-    const rec = { id: state.seq++, itemId, doneAt: nowISO(), dValue: Number(state.config.todayD||0) };
+    const it = state.items.find(function(x){ return x.id===itemId && x.type==='goal'; });
+    if (!it) return;
+    const rec = { id: state.seq++, itemId: itemId, doneAt: nowISO(), dValue: Number(state.config.todayD||0) };
     state.achievements.push(rec); save(state);
   }
 
   // ---------- Shared HTML ----------
-  function catHead(cat){ return `<div class="cat-head"><h3 class="cat-title">${cat}</h3></div>`; }
+  function catHead(cat){ return '<div class="cat-head"><h3 class="cat-title">'+cat+'</h3></div>'; }
   function subChipHTML(sub){
-    return `<div class="chip subtopic" data-sub-id="${sub.id}">
-      <span class="badge">소주제</span>
-      <strong>${escapeHTML(sub.title)}</strong>${sub.detail?` <span class="meta small">${escapeHTML(sub.detail)}</span>`:''}
-      <div class="chip-actions">
-        <button class="chip-btn edit-sub">수정</button>
-        <button class="chip-btn danger del-sub">삭제</button>
-      </div>
-    </div>`;
+    return '<div class="chip subtopic" data-sub-id="'+sub.id+'">'+
+      '<span class="badge">소주제</span>'+
+      '<strong>'+escapeHTML(sub.title)+'</strong>'+(sub.detail? ' <span class="meta small">'+escapeHTML(sub.detail)+'</span>' : '')+
+      '<div class="chip-actions">'+
+        '<button class="chip-btn edit-sub">수정</button>'+
+        '<button class="chip-btn danger del-sub">삭제</button>'+
+      '</div>'+
+    '</div>';
   }
   function goalRowHTML(goal, indent){
-    return `<div class="goal${indent?' sub-goal-indent':''}" data-item-id="${goal.id}">
-      <div class="goal-left">
-        <span class="badge">목표</span>
-        <strong class="g-title">${escapeHTML(goal.title)}</strong>
-        ${goal.detail?`<div class="meta g-detail small">${escapeHTML(goal.detail)}</div>`:''}
-        <div class="meta g-meta small">등록: ${fmtDate(goal.createdAt)}</div>
-      </div>
-      <div class="goal-right">
-        <button class="mini-btn done-btn">완료</button>
-        <button class="mini-btn danger del-btn">삭제</button>
-      </div>
-    </div>`;
+    return '<div class="goal'+(indent?' sub-goal-indent':'')+'" data-item-id="'+goal.id+'">'+
+      '<div class="goal-left">'+
+        '<span class="badge">목표</span>'+
+        '<strong class="g-title">'+escapeHTML(goal.title)+'</strong>'+
+        (goal.detail? '<div class="meta g-detail small">'+escapeHTML(goal.detail)+'</div>' : '')+
+        '<div class="meta g-meta small">등록: '+fmtDate(goal.createdAt)+'</div>'+
+      '</div>'+
+      '<div class="goal-right">'+
+        '<button class="mini-btn done-btn">완료</button>'+
+        '<button class="mini-btn danger del-btn">삭제</button>'+
+      '</div>'+
+    '</div>';
   }
   function goalRowReadOnly(goal, indent){
-    return `<div class="goal${indent?' sub-goal-indent':''}">
-      <div class="goal-left">
-        <span class="badge">목표</span>
-        <strong class="g-title">${escapeHTML(goal.title)}</strong>
-        ${goal.detail?`<div class="meta g-detail small">${escapeHTML(goal.detail)}</div>`:''}
-        <div class="meta g-meta small">등록: ${fmtDate(goal.createdAt)}</div>
-      </div>
-    </div>`;
+    return '<div class="goal'+(indent?' sub-goal-indent':'')+'">'+
+      '<div class="goal-left">'+
+        '<span class="badge">목표</span>'+
+        '<strong class="g-title">'+escapeHTML(goal.title)+'</strong>'+
+        (goal.detail? '<div class="meta g-detail small">'+escapeHTML(goal.detail)+'</div>' : '')+
+        '<div class="meta g-meta small">등록: '+fmtDate(goal.createdAt)+'</div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  // ---------- Optimistic helpers (즉시 DOM 반영) ----------
+  function findCatBoxByAttr(cat) {
+    const cats = document.querySelectorAll('#fullTree .category');
+    for (let i=0;i<cats.length;i++){
+      const el = cats[i];
+      if (el.getAttribute('data-cat') === cat) return el;
+    }
+    return null;
+  }
+  function findSubChipById(container, subId) {
+    const chips = container.querySelectorAll('.subtopic');
+    for (let i=0;i<chips.length;i++){
+      const c = chips[i];
+      if (Number(c.getAttribute('data-sub-id')) === Number(subId)) return c;
+    }
+    return null;
+  }
+  function bindGoalRowEvents(row, gId) {
+    const doneBtn = row.querySelector('.done-btn');
+    const delBtn = row.querySelector('.del-btn');
+    if (doneBtn) doneBtn.addEventListener('click', function(){ completeGoal(gId); toast('완료가 기록되었습니다.'); });
+    if (delBtn) delBtn.addEventListener('click', function(){ deleteItem(gId); renderHome(); });
+  }
+  function insertOptimistic(cat, newItem) {
+    const catBox = findCatBoxByAttr(cat);
+    if (!catBox) return; // 안전장치: 필요 시 전체 렌더로 대체
+
+    if (newItem.type === 'sub') {
+      const subHeader = document.createElement('div');
+      subHeader.className = 'chip subtopic';
+      subHeader.setAttribute('data-sub-id', newItem.id);
+      subHeader.innerHTML =
+        '<span class="badge">소주제</span><strong>'+escapeHTML(newItem.title)+'</strong>'+
+        (newItem.detail? ' <span class="meta small">'+escapeHTML(newItem.detail)+'</span>' : '')+
+        '<div class="chip-actions">'+
+          '<button class="chip-btn edit-sub">수정</button>'+
+          '<button class="chip-btn danger del-sub">삭제</button>'+
+        '</div>';
+
+      const editBtn = subHeader.querySelector('.edit-sub');
+      const delBtn = subHeader.querySelector('.del-sub');
+      if (editBtn) editBtn.addEventListener('click', function(){
+        const nv = prompt('소주제 제목 수정', newItem.title);
+        if (nv===null) return;
+        const t = String(nv).trim(); if (!t) return toast('제목을 입력하세요.');
+        editSub(newItem.id, t); renderHome();
+      });
+      if (delBtn) delBtn.addEventListener('click', function(){ deleteItem(newItem.id); renderHome(); });
+
+      catBox.appendChild(subHeader);
+      return;
+    }
+
+    if (newItem.type === 'goal') {
+      const row = document.createElement('div');
+      const underSub = !!newItem.parentId;
+      row.className = 'goal' + (underSub ? ' sub-goal-indent' : '');
+      row.setAttribute('data-item-id', newItem.id);
+      row.innerHTML =
+        '<div class="goal-left">'+
+          '<span class="badge">목표</span>'+
+          '<strong class="g-title">'+escapeHTML(newItem.title)+'</strong>'+
+          (newItem.detail? '<div class="meta g-detail small">'+escapeHTML(newItem.detail)+'</div>' : '')+
+          '<div class="meta g-meta small">등록: '+fmtDate(newItem.createdAt)+'</div>'+
+        '</div>'+
+        '<div class="goal-right">'+
+          '<button class="mini-btn done-btn">완료</button>'+
+          '<button class="mini-btn danger del-btn">삭제</button>'+
+        '</div>';
+
+      if (underSub) {
+        const subChip = findSubChipById(catBox, newItem.parentId);
+        if (subChip) subChip.insertAdjacentElement('afterend', row);
+        else catBox.appendChild(row);
+      } else {
+        catBox.appendChild(row);
+      }
+      bindGoalRowEvents(row, newItem.id);
+    }
   }
 
   // ---------- Pages ----------
   function renderHome(){
     const d = Number(state.config.todayD||0);
     const bannerStyle = state.config.coverDataUrl
-      ? `style="background-image:url('${state.config.coverDataUrl}');background-size:cover;background-position:center;background-repeat:no-repeat;"`
+      ? 'style="background-image:url(\''+state.config.coverDataUrl+'\');background-size:cover;background-position:center;background-repeat:no-repeat;"'
       : '';
-    const html = `
-      <section class="page page-home">
-        <div id="banner" ${bannerStyle}></div>
-        <div id="todayDbox" class="center-d">D-${d}</div>
+    const html =
+      '<section class="page page-home">'+
+        '<div id="banner" '+bannerStyle+'></div>'+
+        '<div id="todayDbox" class="center-d">D-'+d+'</div>'+
 
-        <div class="card">
-          <div id="fullTree">
-            ${CATS.map(cat=>{
-              const subs = state.items.filter(x=>x.cat===cat && x.type==='sub');
-              const directGoals = state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
-              return `<div class="category" data-cat="${cat}">
-                ${catHead(cat)}
-                ${subs.map(st=>{
-                  const goalsUnder = state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
-                  return `${subChipHTML(st)}${goalsUnder.map(g=>goalRowHTML(g,true)).join('')}`;
-                }).join('')}
-                ${directGoals.map(g=>goalRowHTML(g,false)).join('')}
-              </div>`;
-            }).join('')}
-          </div>
-        </div>
+        '<div class="card">'+
+          '<div id="fullTree">'+
+            CATS.map(function(cat){
+              const subs = state.items.filter(function(x){ return x.cat===cat && x.type==='sub'; });
+              const directGoals = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && !x.parentId; });
+              return '<div class="category" data-cat="'+cat+'">'+
+                catHead(cat)+
+                subs.map(function(st){
+                  const goalsUnder = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && x.parentId===st.id; });
+                  return subChipHTML(st)+goalsUnder.map(function(g){ return goalRowHTML(g,true); }).join('');
+                }).join('')+
+                directGoals.map(function(g){ return goalRowHTML(g,false); }).join('')+
+              '</div>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
 
-        <div class="card" id="homeQuickAdd">
-          <h2>소주제/목표 추가</h2>
-          <div class="form-grid">
-            <label>추가 유형
-              <select id="quickType">
-                <option value="sub">소주제</option>
-                <option value="goal">목표</option>
-              </select>
-            </label>
-            <label>카테고리
-              <select id="quickCat">
-                ${CATS.map(c=>`<option value="${c}">${c}</option>`).join('')}
-              </select>
-            </label>
-            <label>소주제(목표일 때)
-              <select id="quickParent"><option value="">(카테고리 직속)</option></select>
-            </label>
-            <label>제목<input id="quickTitle" type="text" placeholder="제목을 입력"></label>
-            <label>상세(선택)<input id="quickDetail" type="text" placeholder="설명(선택)"></label>
-            <div class="actions"><button id="quickAdd" class="btn">추가</button></div>
-          </div>
-        </div>
-      </section>
-    `;
+        '<div class="card" id="homeQuickAdd">'+
+          '<h2>소주제/목표 추가</h2>'+
+          '<div class="form-grid">'+
+            '<label>추가 유형'+
+              '<select id="quickType">'+
+                '<option value="sub">소주제</option>'+
+                '<option value="goal">목표</option>'+
+              '</select>'+
+            '</label>'+
+            '<label>카테고리'+
+              '<select id="quickCat">'+ CATS.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('') +'</select>'+
+            '</label>'+
+            '<label>소주제(목표일 때)'+
+              '<select id="quickParent"><option value="">(카테고리 직속)</option></select>'+
+            '</label>'+
+            '<label>제목<input id="quickTitle" type="text" placeholder="제목을 입력"></label>'+
+            '<label>상세(선택)<input id="quickDetail" type="text" placeholder="설명(선택)"></label>'+
+            '<div class="actions"><button id="quickAdd" class="btn">추가</button></div>'+
+          '</div>'+
+        '</div>'+
+      '</section>';
+
     view.innerHTML = html;
 
     // subtopic actions
-    $all('#fullTree .subtopic').forEach(node=>{
+    $all('#fullTree .subtopic').forEach(function(node){
       const subId = Number(node.getAttribute('data-sub-id'));
-      node.querySelector('.edit-sub')?.addEventListener('click', ()=>{
-        const it = state.items.find(x=>x.id===subId); if(!it) return;
+      const editBtn = node.querySelector('.edit-sub');
+      const delBtn = node.querySelector('.del-sub');
+      if (editBtn) editBtn.addEventListener('click', function(){
+        const it = state.items.find(function(x){ return x.id===subId; });
+        if (!it) return;
         let nv = prompt('소주제 제목 수정', it.title);
         if (nv===null) return;
         nv = String(nv).trim();
@@ -210,26 +299,28 @@
         editSub(subId, nv);
         renderHome();
       });
-      node.querySelector('.del-sub')?.addEventListener('click', ()=>{
+      if (delBtn) delBtn.addEventListener('click', function(){
         deleteItem(subId);
         renderHome();
       });
     });
 
     // goal actions
-    $all('#fullTree .goal').forEach(row=>{
+    $all('#fullTree .goal').forEach(function(row){
       const id = Number(row.getAttribute('data-item-id'));
-      row.querySelector('.done-btn')?.addEventListener('click', ()=>{
+      const doneBtn = row.querySelector('.done-btn');
+      const delBtn = row.querySelector('.del-btn');
+      if (doneBtn) doneBtn.addEventListener('click', function(){
         completeGoal(id);
         toast('완료가 기록되었습니다.');
       });
-      row.querySelector('.del-btn')?.addEventListener('click', ()=>{
+      if (delBtn) delBtn.addEventListener('click', function(){
         deleteItem(id);
         renderHome();
       });
     });
 
-    // quick add logic
+    // quick add logic (낙관적 삽입)
     const quickType = $('#quickType');
     const quickCat = $('#quickCat');
     const quickParent = $('#quickParent');
@@ -238,117 +329,118 @@
 
     function refreshParentOptions(){
       const cat = quickCat.value;
-      const subs = state.items.filter(x=>x.cat===cat && x.type==='sub');
-      quickParent.innerHTML =
-        `<option value="">(카테고리 직속)</option>` +
-        subs.map(s=>`<option value="${s.id}">소주제: ${escapeHTML(s.title)}</option>`).join('');
+      const subs = state.items.filter(function(x){ return x.cat===cat && x.type==='sub'; });
+      const opts = '<option value="">(카테고리 직속)</option>' + subs.map(function(s){
+        return '<option value="'+s.id+'">소주제: '+escapeHTML(s.title)+'</option>';
+      }).join('');
+      quickParent.innerHTML = opts;
     }
-    quickCat?.addEventListener('change', refreshParentOptions);
+    if (quickCat) quickCat.addEventListener('change', refreshParentOptions);
     refreshParentOptions();
 
-    $('#quickAdd')?.addEventListener('click', ()=>{
+    const quickAdd = $('#quickAdd');
+    if (quickAdd) quickAdd.addEventListener('click', function(){
       const type = quickType.value;
       const cat = quickCat.value;
       const title = String(quickTitle.value||'').trim();
       const detail = String(quickDetail.value||'').trim();
-      if (!cat) return toast('카테고리를 선택하세요.');
-      if (!title) return toast('제목을 입력하세요.');
+      if (!cat){ toast('카테고리를 선택하세요.'); return; }
+      if (!title){ toast('제목을 입력하세요.'); return; }
 
       if (type==='sub'){
-        addSub({cat,title,detail});
+        const it = addSub({cat:cat, title:title, detail:detail});
+        insertOptimistic(cat, it);       // 즉시 DOM 삽입
         toast('소주제가 추가되었습니다.');
+        refreshParentOptions();          // 부모 드롭다운 즉시 갱신
       } else {
         const pid = quickParent.value ? Number(quickParent.value) : null;
-        addGoal({cat,parentId:pid,title,detail});
+        const it = addGoal({cat:cat, parentId:pid, title:title, detail:detail});
+        insertOptimistic(cat, it);       // 즉시 DOM 삽입
         toast('목표가 추가되었습니다.');
       }
+
       quickTitle.value=''; quickDetail.value='';
-      renderHome();
+      // 필요시 완전 재렌더: requestAnimationFrame(function(){ renderHome(); });
     });
   }
 
   function renderHistory(){
-    const itemMap = Object.fromEntries(state.items.map(i=>[i.id,i]));
-    const rows = state.achievements.slice().sort((a,b)=> new Date(a.doneAt)-new Date(b.doneAt));
+    const itemMap = {};
+    for (let i=0;i<state.items.length;i++){ itemMap[state.items[i].id] = state.items[i]; }
+    const rows = state.achievements.slice().sort(function(a,b){ return new Date(a.doneAt)-new Date(b.doneAt); });
     const grouped = {}; // cat -> subId -> records
-    rows.forEach(rec=>{
+    rows.forEach(function(rec){
       const it = itemMap[rec.itemId]; if (!it) return;
       const cat = it.cat; const subId = it.parentId || 0;
-      grouped[cat] ||= {}; grouped[cat][subId] ||= [];
+      if (!grouped[cat]) grouped[cat] = {};
+      if (!grouped[cat][subId]) grouped[cat][subId] = [];
       grouped[cat][subId].push({ title: it.title, doneAt: rec.doneAt, dValue: rec.dValue });
     });
 
-    let html = `<section class="page page-history"><div class="card"><h2>완료기록</h2>`;
-    html += CATS.map(cat=>{
+    let html = '<section class="page page-history"><div class="card"><h2>완료기록</h2>';
+    html += CATS.map(function(cat){
       const g = grouped[cat] || {};
       const keys = Object.keys(g);
       if (!keys.length){
-        return `<div class="category" data-cat="${cat}">${catHead(cat)}<p class="meta small">완료 기록이 없습니다.</p></div>`;
+        return '<div class="category" data-cat="'+cat+'">'+catHead(cat)+'<p class="meta small">완료 기록이 없습니다.</p></div>';
       }
-      const blocks = keys.map(k=>{
+      const blocks = keys.map(function(k){
         const sid = Number(k);
         let head = '';
         if (sid){
-          const st = state.items.find(i=>i.id===sid);
-          head = `<div class="chip"><span class="badge">소주제</span><strong>${st?escapeHTML(st.title):'(소주제)'}</strong></div>`;
+          const st = state.items.find(function(i){ return i.id===sid; });
+          head = '<div class="chip"><span class="badge">소주제</span><strong>'+(st?escapeHTML(st.title):'(소주제)')+'</strong></div>';
         }
         const recs = g[k];
-        const body = recs.map(r=>`
-          <div class="goal${sid?' sub-goal-indent':''}">
-            <div><span class="badge">목표</span>
-              <strong>${escapeHTML(r.title)}</strong>
-              <div class="meta small">${fmtDate(r.doneAt)} • D-${r.dValue}</div>
-            </div>
-          </div>`).join('');
+        const body = recs.map(function(r){
+          return '<div class="goal'+(sid?' sub-goal-indent':'')+'"><div><span class="badge">목표</span>'
+               + '<strong>'+escapeHTML(r.title)+'</strong>'
+               + '<div class="meta small">'+fmtDate(r.doneAt)+' • D-'+r.dValue+'</div>'
+               + '</div></div>';
+        }).join('');
         return head + body;
       }).join('');
-      return `<div class="category" data-cat="${cat}">${catHead(cat)}${blocks}</div>`;
+      return '<div class="category" data-cat="'+cat+'">'+catHead(cat)+blocks+'</div>';
     }).join('');
-    html += `</div></section>`;
+    html += '</div></section>';
     view.innerHTML = html;
   }
 
   function renderProgress(){
-    let html = `<section class="page page-progress"><div class="card"><h2>진행현황</h2>`;
-    html += CATS.map(cat=>{
-      const subs = state.items.filter(x=>x.cat===cat && x.type==='sub');
-      const directGoals = state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
-      return `<div class="category" data-cat="${cat}">
-        ${catHead(cat)}
-        ${subs.map(st=>{
-          const goalsUnder = state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
-          return `<div class="subtopic chip">
-              <span class="badge">소주제</span><strong>${escapeHTML(st.title)}</strong>${st.detail?` <span class="meta small">${escapeHTML(st.detail)}</span>`:''}
-            </div>
-            ${goalsUnder.map(g=>goalRowReadOnly(g,true)).join('')}`;
-        }).join('')}
-        ${directGoals.map(g=>goalRowReadOnly(g,false)).join('')}
-      </div>`;
+    let html = '<section class="page page-progress"><div class="card"><h2>진행현황</h2>';
+    html += CATS.map(function(cat){
+      const subs = state.items.filter(function(x){ return x.cat===cat && x.type==='sub'; });
+      const directGoals = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && !x.parentId; });
+      return '<div class="category" data-cat="'+cat+'">'
+        + catHead(cat)
+        + subs.map(function(st){
+            const goalsUnder = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && x.parentId===st.id; });
+            return '<div class="subtopic chip"><span class="badge">소주제</span><strong>'+escapeHTML(st.title)+'</strong>'
+                 + (st.detail? ' <span class="meta small">'+escapeHTML(st.detail)+'</span>' : '')
+                 + '</div>'
+                 + goalsUnder.map(function(g){ return goalRowReadOnly(g,true); }).join('');
+          }).join('')
+        + directGoals.map(function(g){ return goalRowReadOnly(g,false); }).join('')
+      + '</div>';
     }).join('');
-    html += `</div></section>`;
+    html += '</div></section>';
     view.innerHTML = html;
   }
 
   function renderSettings(){
     const d = Number(state.config.todayD||0);
-    const html = `
-      <section class="page page-settings">
-        <div class="card">
-          <h2>설정</h2>
-          <div class="form-grid">
-            <label>메인 배너 이미지
-              <input id="coverFile" type="file" accept="image/*">
-            </label>
-            <div class="imgBox">
-              <img id="coverPreview" alt="미리보기" style="display:${state.config.coverDataUrl?'block':'none'}">
-            </div>
-            <label>오늘 기준 D-값
-              <input id="todayD" type="number" min="0" max="99" value="${d}">
-            </label>
-            <div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>
-          </div>
-        </div>
-      </section>`;
+    const html =
+      '<section class="page page-settings">'+
+        '<div class="card">'+
+          '<h2>설정</h2>'+
+          '<div class="form-grid">'+
+            '<label>메인 배너 이미지<input id="coverFile" type="file" accept="image/*"></label>'+
+            '<div class="imgBox"><img id="coverPreview" alt="미리보기" style="display:'+(state.config.coverDataUrl?'block':'none')+'"></div>'+
+            '<label>오늘 기준 D-값<input id="todayD" type="number" min="0" max="99" value="'+d+'"></label>'+
+            '<div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>'+
+          '</div>'+
+        '</div>'+
+      '</section>';
     view.innerHTML = html;
 
     const coverFile = $('#coverFile');
@@ -361,23 +453,31 @@
       coverPreview.style.borderRadius='12px';
       coverPreview.style.border='1px solid var(--line)';
     }
-    coverFile?.addEventListener('change', (e)=>{
-      const f = e.target.files && e.target.files[0]; if(!f) return;
-      const reader = new FileReader();
-      reader.onload = ()=>{
-        state.config.coverDataUrl = String(reader.result||'');
-        save(state);
-        coverPreview.src = state.config.coverDataUrl;
-        coverPreview.style.display = 'block';
-      };
-      reader.readAsDataURL(f);
-    });
+    if (coverFile){
+      coverFile.addEventListener('change', function(e){
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = function(){
+          state.config.coverDataUrl = String(reader.result||'');
+          save(state);
+          coverPreview.src = state.config.coverDataUrl;
+          coverPreview.style.display = 'block';
+        };
+        reader.readAsDataURL(f);
+      });
+    }
 
-    $('#saveSettingsBtn')?.addEventListener('click', ()=>{
-      state.config.todayD = Number(($('#todayD')||{}).value || 0);
-      save(state);
-      toast('설정이 적용되었습니다.');
-    });
+    const saveBtn = $('#saveSettingsBtn');
+    if (saveBtn){
+      saveBtn.addEventListener('click', function(){
+        const vInput = $('#todayD');
+        const v = Number((vInput && vInput.value) || 0);
+        state.config.todayD = v;
+        save(state);
+        toast('설정이 적용되었습니다.');
+      });
+    }
   }
 
   // ---------- Render switch ----------
@@ -393,7 +493,7 @@
 
   // ---------- SW(optional) ----------
   if('serviceWorker' in navigator){
-    window.addEventListener('load', ()=>{ try{ navigator.serviceWorker.register('./sw.js'); }catch(e){} });
+    window.addEventListener('load', function(){ try{ navigator.serviceWorker.register('./sw.js'); }catch(e){} });
   }
 
   // first paint
