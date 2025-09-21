@@ -1,480 +1,422 @@
-// v6-optimistic-patch2: subtopic edit, robust mapping, full-image banner
+// D-Tracker v6 — 기존 HTML/CSS 그대로 동작 + 홈 하단 입력칸 + 카테고리 라벨 자동 복구 + 카드 래핑 유지
 (() => {
-  // ---- Tabs (unchanged) ----
-  const tabs = document.querySelectorAll('header .tabs button');
-  const pages = document.querySelectorAll('.page');
-  tabs.forEach(btn => btn.addEventListener('click', () => {
-    tabs.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    pages.forEach(p => p.classList.remove('active'));
-    document.getElementById('page-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'completed') { fillCycleSelect(); renderCompleted(); updateCompletedHeader(); }
-    if (btn.dataset.tab === 'overview') { renderOverview(); }
-    if (btn.dataset.tab === 'home') { renderHome(); }
-    if (btn.dataset.tab === 'settings') { fillSettings(); }
-  }));
-
-  // ---- SW (unchanged) ----
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
-  }
-
-  // ---- State ----
+  // ---------- State ----------
   const KEY = 'hundreddays_v6';
+  // 화면은 예전 카테고리 이름 기준으로 고정(기존 데이터 그대로 보이게)
+  const CATS = ['돈을 벌기위한 행위','신앙을 지키는 행위','가족을 챙기기 위한 행위','나를 위한 시간'];
 
-  // ✅ 원본 이름 유지 (기존 로컬데이터가 그대로 보이도록)
-  const FIXED_CATS = ['돈을 벌기위한 행위','신앙을 지키는 행위','가족을 챙기기 위한 행위','나를 위한 시간'];
-
-  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }
-  function save(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
-  function initState() {
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY))||{} }catch{ return {} } }
+  function save(s){ localStorage.setItem(KEY, JSON.stringify(s)); }
+  function initState(){
     const s = load();
-    s.config ||= { startDate: '', useDday: false, todayD: 0, currentCycleN: 1, coverDataUrl: '' };
-    s.items ||= []; // {id, cat, type:'goal'|'sub', title, detail, parentId?, createdAt}
-    s.achievements ||= []; // {id, itemId, cycleIndex, doneAt, dValue}
-    s.seq ||= 1;
-    save(s);
-    return s;
+    if (!s.config) s.config = {};
+    if (typeof s.config.coverDataUrl !== 'string') s.config.coverDataUrl = '';
+    if (typeof s.config.todayD !== 'number') s.config.todayD = 0;
+    if (!Array.isArray(s.items)) s.items = [];        // {id, cat, type:'sub'|'goal', title, detail?, parentId?, createdAt}
+    if (!Array.isArray(s.achievements)) s.achievements = []; // {id, itemId, doneAt, dValue}
+    if (typeof s.seq !== 'number') s.seq = 1;
+    save(s); return s;
   }
   let state = initState();
 
-  // ✅ 추가 1: 카테고리 라벨 자동 마이그레이션 (새 이름 → 예전 이름으로 맞춤)
-  //  - 예전에 저장된 데이터, 혹은 내가 잠깐 새 라벨로 추가했던 데이터가 섞여 있어도
-  //    렌더가 끊기지 않도록 한 번만 정규화
-  (function normalizeOldCategories() {
-    const mapToOld = {
+  // ---------- (중요) 기존/새 라벨 섞여 있어도 예전 라벨로 자동 정규화 ----------
+  (function normalizeCats(){
+    const toOld = {
       '돈을 버는 행위': '돈을 벌기위한 행위',
       '영성 유지를 위한 행위': '신앙을 지키는 행위',
       '가족을 위한 행위': '가족을 챙기기 위한 행위',
       '나를 위한 시간': '나를 위한 시간'
     };
     let changed = false;
-    for (const it of state.items || []) {
-      if (mapToOld[it.cat]) { it.cat = mapToOld[it.cat]; changed = true; }
+    for (let i=0;i<state.items.length;i++){
+      const it = state.items[i];
+      if (toOld[it.cat]) { it.cat = toOld[it.cat]; changed = true; }
     }
     if (changed) save(state);
   })();
 
-  // ---- DOM ----
-  const $ = (id) => document.getElementById(id);
-  const headerTitle = $('headerTitle');
-  const banner = $('banner');
-  const todayDbox = $('todayDbox');
-  const fullTree = $('fullTree');
-  const quickCat = $('quickCat');
-  const quickType = $('quickType');
-  const quickTitle = $('quickTitle');
-  const quickDetail = $('quickDetail');
-  const quickParent = $('quickParent');
-  const cycleSelect = $('cycleSelect');
-  const completedList = $('completedList');
-  const completedHeaderD = $('completedHeaderD');
-  const completedTitle = $('completedTitle');
-  const startDate = $('startDate');
-  const coverFile = $('coverFile');
-  const useDday = $('useDday');
-  const todayD = $('todayD');
-  const currentCycleN = $('currentCycleN');
-  const coverPreview = $('coverPreview');
+  // ---------- DOM helpers ----------
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function $all(sel, root){ return Array.prototype.slice.call((root||document).querySelectorAll(sel)); }
+  var view = $('#view');
+  var toastBox = $('#toast');
 
-  // ---- Utils ----
-  function daysBetween(a, b) {
-    const MS = 24*60*60*1000;
-    return Math.floor((b - a) / MS);
-  }
-  function effectiveStartDate() {
-    if (state.config.useDday) {
-      const d = new Date(); d.setHours(0,0,0,0);
-      d.setDate(d.getDate() - Math.max(0, Math.min(99, Number(state.config.todayD)||0)));
-      return d;
-    }
-    if (!state.config.startDate) return null;
-    return new Date(state.config.startDate + 'T00:00:00');
-  }
-  function currentCycleIndexComputed() {
-    const start = effectiveStartDate();
-    if (!start) return 0;
-    const today = new Date(); today.setHours(0,0,0,0);
-    const d = daysBetween(start, today);
-    return Math.max(0, Math.floor(d / 100));
-  }
-  function dValueFor(date) {
-    const start = effectiveStartDate();
-    if (!start) return 0;
-    const d = daysBetween(start, new Date(new Date(date).setHours(0,0,0,0)));
-    return Math.max(0, d % 100);
-  }
-  function cycleRange(idx) {
-    const start = effectiveStartDate();
-    if (!start) return null;
-    const from = new Date(start.getTime() + (idx*100)*86400000);
-    const to = new Date(from.getTime() + 100*86400000 - 1);
-    return {from, to};
-  }
-  const fmtDate = (d)=> new Date(d).toLocaleString();
-  const isoDay = (d)=> d.toISOString().slice(0,10);
+  // 버전표시 제거(HTML 수정 없이)
+  (function removeVersion(){
+    var v = document.querySelector('.topbar .version');
+    if (v && v.parentNode) v.parentNode.removeChild(v);
+  })();
 
-  // ---- Header + Banner ----
-  function renderHeader() {
-    const start = effectiveStartDate();
-    headerTitle.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
-  }
-  function renderBanner() {
-    const dataUrl = state.config.coverDataUrl || '';
-    banner.style.backgroundImage = dataUrl ? `url('${dataUrl}')` : 'none';
-    banner.style.backgroundSize = 'contain'; // (원본 유지) 전체 이미지 보이게
-    banner.style.backgroundPosition = 'center';
-    banner.style.backgroundRepeat = 'no-repeat';
-    const start = effectiveStartDate();
-    todayDbox.textContent = start ? `D-${dValueFor(new Date())}` : `D-${Number(state.config.todayD||0)}`;
-  }
-
-  // ---- Quick selectors (원본 유지) ----
-  function fillQuickSelectors() {
-    quickCat.innerHTML = '';
-    for (const c of FIXED_CATS) {
-      const opt = document.createElement('option');
-      opt.value = c; opt.textContent = c; quickCat.appendChild(opt);
-    }
-    updateParentSubSelect();
-  }
-  function updateParentSubSelect() {
-    const cat = quickCat.value;
-    quickParent.innerHTML = '<option value="">(카테고리 직속)</option>';
-    const subs = state.items.filter(x => x.cat===cat && x.type==='sub');
-    for (const st of subs) {
-      const o = document.createElement('option');
-      o.value = String(st.id);
-      o.textContent = `소주제: ${st.title}`;
-      quickParent.appendChild(o);
-    }
-  }
-  quickCat.addEventListener('change', updateParentSubSelect);
-
-  // ---- Optimistic helpers (원본 유지) ----
-  function goalRowHTML(g) {
-    return `<div class="goal-left">
-      <div class="badge">목표</div>
-      <strong class="g-title">${g.title}</strong>
-      <div class="meta g-detail">${g.detail||''}</div>
-      <div class="meta g-meta">등록: ${fmtDate(g.createdAt || new Date())}</div>
-    </div>
-    <div class="goal-right">
-      <button class="done-btn">달성</button>
-      <button class="del-btn danger">삭제</button>
-    </div>`;
-  }
-  function bindGoalRowEvents(row, g) {
-    const doneBtn = row.querySelector('.done-btn');
-    const delBtn = row.querySelector('.del-btn');
-    if (doneBtn) doneBtn.addEventListener('click', () => markDone(g.id));
-    if (delBtn) delBtn.addEventListener('click', () => deleteItem(g.id));
-  }
-  function findCatBoxByAttr(cat) {
-    const cats = fullTree.querySelectorAll('.category');
-    for (const el of cats) {
-      if (el.getAttribute('data-cat') === cat) return el;
-    }
-    return null;
-  }
-  function findSubChipById(container, subId) {
-    const chips = container.querySelectorAll('.subtopic');
-    for (const c of chips) {
-      if (Number(c.getAttribute('data-sub-id')) === Number(subId)) return c;
-    }
-    return null;
-  }
-  function insertOptimistic(cat, newItem) {
-    const catBox = findCatBoxByAttr(cat);
-    if (!catBox) return; // fallback: full render will handle
-    if (newItem.type === 'sub') {
-      const subHeader = document.createElement('div');
-      subHeader.className = 'chip subtopic';
-      subHeader.setAttribute('data-sub-id', newItem.id);
-      subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${newItem.title}</strong>${newItem.detail?` <span class="meta">${newItem.detail}</span>`:''}
-        <button class="edit-sub" style="margin-left:6px">수정</button>
-        <button class="del-sub danger" style="margin-left:6px">삭제</button>`;
-      subHeader.querySelector('.edit-sub').addEventListener('click', () => editSubtopic(newItem.id));
-      subHeader.querySelector('.del-sub').addEventListener('click', () => deleteItem(newItem.id));
-      catBox.appendChild(subHeader);
-      return;
-    }
-    if (newItem.type === 'goal') {
-      const row = document.createElement('div');
-      const underSub = !!newItem.parentId;
-      row.className = 'goal' + (underSub ? ' sub-goal-indent' : '');
-      row.setAttribute('data-item-id', newItem.id);
-      row.innerHTML = goalRowHTML(newItem);
-      if (underSub) {
-        const subChip = findSubChipById(catBox, newItem.parentId);
-        if (subChip) subChip.insertAdjacentElement('afterend', row);
-        else catBox.appendChild(row);
-      } else {
-        catBox.appendChild(row);
-      }
-      bindGoalRowEvents(row, newItem);
-    }
-  }
-
-  // ---- Add (원본 유지: 홈에서 즉시 추가) ----
-  $('quickAdd').addEventListener('click', () => {
-    const cat = quickCat.value;
-    const type = quickType.value;
-    const title = quickTitle.value.trim();
-    const detail = quickDetail.value.trim();
-    if (!cat) return alert('카테고리를 선택하세요.');
-    if (!title) return alert('제목을 입력하세요.');
-
-    const item = { id: state.seq++, cat, type, title, detail, createdAt: new Date().toISOString() };
-    if (type==='goal') {
-      const pid = quickParent.value ? Number(quickParent.value) : null;
-      if (pid) item.parentId = pid;
-    }
-    state.items.push(item);
-    save(state);
-
-    insertOptimistic(cat, item);
-
-    quickTitle.value=''; quickDetail.value='';
-    updateParentSubSelect();
-
-    requestAnimationFrame(() => {
-      renderFullTree();
-      renderOverview();
+  // ---------- Tabs ----------
+  var currentPage = 'home';
+  $all('.tabs .tab').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      $all('.tabs .tab').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      currentPage = btn.getAttribute('data-page');
+      render();
     });
   });
+  (function firstActive(){
+    var first = document.querySelector('.tabs .tab[data-page="home"]') || document.querySelector('.tabs .tab');
+    if (first) first.classList.add('active');
+  })();
 
-  // ---- Edit subtopic (원본 유지) ----
-  function editSubtopic(subId) {
-    const it = state.items.find(x => x.id === Number(subId) && x.type==='sub');
+  // ---------- Utils ----------
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function fmtDate(d){
+    var t = new Date(d);
+    return t.getFullYear()+'-'+pad2(t.getMonth()+1)+'-'+pad2(t.getDate())+' '+pad2(t.getHours())+':'+pad2(t.getMinutes());
+  }
+  function nowISO(){ return new Date().toISOString(); }
+  function toast(msg){
+    if (!toastBox){ alert(msg); return; }
+    toastBox.textContent = msg;
+    toastBox.classList.add('show');
+    setTimeout(function(){ toastBox.classList.remove('show'); }, 1500);
+  }
+
+  // ---------- Data ops ----------
+  function addSub(obj){
+    var it = { id: state.seq++, cat: obj.cat, type:'sub', title: obj.title, detail: obj.detail||'', createdAt: nowISO() };
+    state.items.push(it); save(state); return it;
+  }
+  function addGoal(obj){
+    var it = { id: state.seq++, cat: obj.cat, type:'goal', parentId: obj.parentId||null, title: obj.title, detail: obj.detail||'', createdAt: nowISO() };
+    state.items.push(it); save(state); return it;
+  }
+  function editSub(subId, newTitle){
+    var it = state.items.find(function(x){ return x.id===subId && x.type==='sub'; });
     if (!it) return;
-    const newTitle = prompt('소주제 제목 수정', it.title);
-    if (newTitle === null) return; // cancel
-    const t = newTitle.trim();
-    if (!t) return alert('제목을 입력하세요.');
-    it.title = t;
-    // 상세 수정 원하면 아래 주석 해제 가능
-    // const newDetail = prompt('설명(선택)', it.detail || '');
-    // if (newDetail !== null) it.detail = newDetail.trim();
+    it.title = String(newTitle||'').trim();
     save(state);
-    renderFullTree();
-    renderOverview();
   }
+  function deleteItem(itemId){
+    var target = state.items.find(function(x){ return x.id===itemId; });
+    if (!target) return;
+    if (!confirm('정말 "'+target.title+'"을(를) 삭제할까요? 소주제를 삭제하면 하위 목표도 함께 삭제됩니다.')) return;
 
-  // ---- Done / Delete (원본 유지) ----
-  function markDone(itemId) {
-    const start = effectiveStartDate();
-    if (!start) return alert('설정에서 시작일 또는 D값을 먼저 저장하세요.');
-    const now = new Date();
-    const dval = dValueFor(now);
-    const idxBySetting = Math.max(1, Number(state.config.currentCycleN||1)) - 1;
-    const rec = { id: state.seq++, itemId, cycleIndex: idxBySetting, doneAt: now.toISOString(), dValue: dval };
-    state.achievements.push(rec); save(state);
-    renderCompleted();
-    renderFullTree();
-    renderOverview();
-  }
-  function deleteItem(itemId) {
-    const item = state.items.find(i=>i.id===itemId);
-    if (!item) return;
-    if (!confirm(`정말 "${item.title}"을(를) 삭제할까요? 소주제를 삭제하면 하위 목표도 함께 삭제됩니다.`)) return;
-    if (item.type==='sub') {
-      state.items = state.items.filter(i => !(i.id===itemId || i.parentId===itemId));
+    var removedIds = [];
+    if (target.type==='sub'){
+      removedIds = state.items.filter(function(i){ return i.id===itemId || i.parentId===itemId; }).map(function(i){ return i.id; });
+      state.items = state.items.filter(function(i){ return !(i.id===itemId || i.parentId===itemId); });
     } else {
-      state.items = state.items.filter(i => i.id!==itemId);
+      removedIds = [itemId];
+      state.items = state.items.filter(function(i){ return i.id!==itemId; });
     }
-    // (원본 유지) 삭제 시 완료기록 정리는 그대로 두거나 필요 시 여기서 처리
+    // 고아 완료기록 제거
+    state.achievements = state.achievements.filter(function(a){ return removedIds.indexOf(a.itemId)===-1; });
     save(state);
-    renderFullTree();
-    renderOverview();
+  }
+  function completeGoal(itemId){
+    var it = state.items.find(function(x){ return x.id===itemId && x.type==='goal'; });
+    if (!it) return;
+    var rec = { id: state.seq++, itemId: itemId, doneAt: nowISO(), dValue: Number(state.config.todayD||0) };
+    state.achievements.push(rec); save(state);
   }
 
-  // ---- HOME render (원본 템플릿 그대로) ----
-  function renderFullTree() {
-    fullTree.innerHTML = '';
-    for (const cat of FIXED_CATS) {
-      const catBox = document.createElement('div');
-      catBox.className = 'category';
-      catBox.setAttribute('data-cat', cat);
-      catBox.innerHTML = `<div class="cat-head"><h3 class="cat-title">${cat}</h3></div>`;
+  // ---------- Shared HTML ----------
+  function catHead(cat){ return '<div class="cat-head"><h3 class="cat-title">'+cat+'</h3></div>'; }
+  function subChipHTML(sub){
+    return '<div class="chip subtopic" data-sub-id="'+sub.id+'">'+
+      '<span class="badge">소주제</span>'+
+      '<strong>'+escapeHTML(sub.title)+'</strong>'+(sub.detail? ' <span class="meta small">'+escapeHTML(sub.detail)+'</span>' : '')+
+      '<div class="chip-actions">'+
+        '<button class="chip-btn edit-sub">수정</button>'+
+        '<button class="chip-btn danger del-sub">삭제</button>'+
+      '</div>'+
+    '</div>';
+  }
+  function goalRowHTML(goal, indent){
+    return '<div class="goal'+(indent?' sub-goal-indent':'')+'" data-item-id="'+goal.id+'">'+
+      '<div class="goal-left">'+
+        '<span class="badge">목표</span>'+
+        '<strong class="g-title">'+escapeHTML(goal.title)+'</strong>'+
+        (goal.detail? '<div class="meta g-detail small">'+escapeHTML(goal.detail)+'</div>' : '')+
+        '<div class="meta g-meta small">등록: '+fmtDate(goal.createdAt)+'</div>'+
+      '</div>'+
+      '<div class="goal-right">'+
+        '<button class="mini-btn done-btn">완료</button>'+
+        '<button class="mini-btn danger del-btn">삭제</button>'+
+      '</div>'+
+    '</div>';
+  }
+  function goalRowReadOnly(goal, indent){
+    return '<div class="goal'+(indent?' sub-goal-indent':'')+'">'+
+      '<div class="goal-left">'+
+        '<span class="badge">목표</span>'+
+        '<strong class="g-title">'+escapeHTML(goal.title)+'</strong>'+
+        (goal.detail? '<div class="meta g-detail small">'+escapeHTML(goal.detail)+'</div>' : '')+
+        '<div class="meta g-meta small">등록: '+fmtDate(goal.createdAt)+'</div>'+
+      '</div>'+
+    '</div>';
+  }
+  function escapeHTML(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+    });
+  }
 
-      const subs = state.items.filter(x => x.cat===cat && x.type==='sub');
-      for (const st of subs) {
-        const subHeader = document.createElement('div');
-        subHeader.className = 'chip subtopic';
-        subHeader.setAttribute('data-sub-id', st.id);
-        subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}
-          <button class="edit-sub" style="margin-left:6px">수정</button>
-          <button class="del-sub danger" style="margin-left:6px">삭제</button>`;
-        subHeader.querySelector('.edit-sub').addEventListener('click', () => editSubtopic(st.id));
-        subHeader.querySelector('.del-sub').addEventListener('click', () => deleteItem(st.id));
-        catBox.appendChild(subHeader);
+  // ---------- Pages ----------
+  function renderHome(){
+    var d = Number(state.config.todayD||0);
+    var bannerStyle = state.config.coverDataUrl
+      ? 'style="background-image:url(\''+state.config.coverDataUrl+'\');background-size:cover;background-position:center;background-repeat:no-repeat;"'
+      : '';
+    var html = ''
+    + '<section class="page page-home">'
+    +   '<div id="banner" '+bannerStyle+'></div>'
+    +   '<div id="todayDbox" class="center-d">D-'+d+'</div>'
 
-        const goalsUnder = state.items.filter(x => x.cat===cat && x.type==='goal' && x.parentId===st.id);
-        for (const g of goalsUnder) {
-          const row = document.createElement('div');
-          row.className = 'goal sub-goal-indent';
-          row.setAttribute('data-item-id', g.id);
-          row.innerHTML = `<div class="goal-left">
-            <div class="badge">목표</div>
-            <strong class="g-title">${g.title}</strong>
-            <div class="meta g-detail">${g.detail||''}</div>
-            <div class="meta g-meta">등록: ${fmtDate(g.createdAt)}</div>
-          </div>
-          <div class="goal-right">
-            <button class="done-btn">달성</button>
-            <button class="del-btn danger">삭제</button>
-          </div>`;
-          row.querySelector('.done-btn').addEventListener('click', () => markDone(g.id));
-          row.querySelector('.del-btn').addEventListener('click', () => deleteItem(g.id));
-          catBox.appendChild(row);
+    +   '<div class="card">'
+    +     '<div id="fullTree">'
+    +       CATS.map(function(cat){
+              var subs = state.items.filter(function(x){ return x.cat===cat && x.type==='sub'; });
+              var directGoals = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && !x.parentId; });
+              return '<div class="category" data-cat="'+cat+'">'
+                + catHead(cat)
+                + subs.map(function(st){
+                    var goalsUnder = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && x.parentId===st.id; });
+                    return subChipHTML(st) + goalsUnder.map(function(g){ return goalRowHTML(g,true); }).join('');
+                  }).join('')
+                + directGoals.map(function(g){ return goalRowHTML(g,false); }).join('')
+              + '</div>';
+            }).join('')
+    +     '</div>'
+    +   '</div>'
+
+    +   '<div class="card" id="homeQuickAdd">'
+    +     '<h2>소주제/목표 추가</h2>'
+    +     '<div class="form-grid">'
+    +       '<label>추가 유형'
+    +         '<select id="quickType">'
+    +           '<option value="sub">소주제</option>'
+    +           '<option value="goal">목표</option>'
+    +         '</select>'
+    +       '</label>'
+    +       '<label>카테고리'
+    +         '<select id="quickCat">'+ CATS.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('') +'</select>'
+    +       '</label>'
+    +       '<label>소주제(목표일 때)'
+    +         '<select id="quickParent"><option value="">(카테고리 직속)</option></select>'
+    +       '</label>'
+    +       '<label>제목<input id="quickTitle" type="text" placeholder="제목을 입력"></label>'
+    +       '<label>상세(선택)<input id="quickDetail" type="text" placeholder="설명(선택)"></label>'
+    +       '<div class="actions"><button id="quickAdd" class="btn">추가</button></div>'
+    +     '</div>'
+    +   '</div>'
+    + '</section>';
+
+    view.innerHTML = html;
+
+    // subtopic actions
+    $all('#fullTree .subtopic').forEach(function(node){
+      var subId = Number(node.getAttribute('data-sub-id'));
+      var editBtn = node.querySelector('.edit-sub');
+      var delBtn = node.querySelector('.del-sub');
+      if (editBtn) editBtn.addEventListener('click', function(){
+        var it = state.items.find(function(x){ return x.id===subId; });
+        if (!it) return;
+        var nv = prompt('소주제 제목 수정', it.title);
+        if (nv===null) return;
+        nv = String(nv).trim();
+        if (!nv){ toast('제목을 입력하세요.'); return; }
+        editSub(subId, nv);
+        renderHome();
+      });
+      if (delBtn) delBtn.addEventListener('click', function(){
+        deleteItem(subId);
+        renderHome();
+      });
+    });
+
+    // goal actions
+    $all('#fullTree .goal').forEach(function(row){
+      var id = Number(row.getAttribute('data-item-id'));
+      var doneBtn = row.querySelector('.done-btn');
+      var delBtn = row.querySelector('.del-btn');
+      if (doneBtn) doneBtn.addEventListener('click', function(){
+        completeGoal(id);
+        toast('완료가 기록되었습니다.');
+      });
+      if (delBtn) delBtn.addEventListener('click', function(){
+        deleteItem(id);
+        renderHome();
+      });
+    });
+
+    // quick add logic
+    var quickType = $('#quickType');
+    var quickCat = $('#quickCat');
+    var quickParent = $('#quickParent');
+    var quickTitle = $('#quickTitle');
+    var quickDetail = $('#quickDetail');
+
+    function refreshParentOptions(){
+      var cat = quickCat.value;
+      var subs = state.items.filter(function(x){ return x.cat===cat && x.type==='sub'; });
+      var opts = '<option value="">(카테고리 직속)</option>' + subs.map(function(s){
+        return '<option value="'+s.id+'">소주제: '+escapeHTML(s.title)+'</option>';
+      }).join('');
+      quickParent.innerHTML = opts;
+    }
+    if (quickCat) quickCat.addEventListener('change', refreshParentOptions);
+    refreshParentOptions();
+
+    var quickAdd = $('#quickAdd');
+    if (quickAdd) quickAdd.addEventListener('click', function(){
+      var type = quickType.value;
+      var cat = quickCat.value;
+      var title = String(quickTitle.value||'').trim();
+      var detail = String(quickDetail.value||'').trim();
+      if (!cat){ toast('카테고리를 선택하세요.'); return; }
+      if (!title){ toast('제목을 입력하세요.'); return; }
+
+      if (type==='sub'){
+        addSub({cat:cat, title:title, detail:detail});
+        toast('소주제가 추가되었습니다.');
+      } else {
+        var pid = quickParent.value ? Number(quickParent.value) : null;
+        addGoal({cat:cat, parentId:pid, title:title, detail:detail});
+        toast('목표가 추가되었습니다.');
+      }
+      quickTitle.value=''; quickDetail.value='';
+      renderHome();
+    });
+  }
+
+  function renderHistory(){
+    var itemMap = {};
+    for (var i=0;i<state.items.length;i++){ itemMap[state.items[i].id] = state.items[i]; }
+    var rows = state.achievements.slice().sort(function(a,b){ return new Date(a.doneAt)-new Date(b.doneAt); });
+    var grouped = {}; // cat -> subId -> records
+    rows.forEach(function(rec){
+      var it = itemMap[rec.itemId]; if (!it) return;
+      var cat = it.cat; var subId = it.parentId || 0;
+      if (!grouped[cat]) grouped[cat] = {};
+      if (!grouped[cat][subId]) grouped[cat][subId] = [];
+      grouped[cat][subId].push({ title: it.title, doneAt: rec.doneAt, dValue: rec.dValue });
+    });
+
+    var html = '<section class="page page-history"><div class="card"><h2>완료기록</h2>';
+    html += CATS.map(function(cat){
+      var g = grouped[cat] || {};
+      var keys = Object.keys(g);
+      if (!keys.length){
+        return '<div class="category" data-cat="'+cat+'">'+catHead(cat)+'<p class="meta small">완료 기록이 없습니다.</p></div>';
+      }
+      var blocks = keys.map(function(k){
+        var sid = Number(k);
+        var head = '';
+        if (sid){
+          var st = state.items.find(function(i){ return i.id===sid; });
+          head = '<div class="chip"><span class="badge">소주제</span><strong>'+(st?escapeHTML(st.title):'(소주제)')+'</strong></div>';
         }
-      }
+        var recs = g[k];
+        var body = recs.map(function(r){
+          return '<div class="goal'+(sid?' sub-goal-indent':'')+'"><div><span class="badge">목표</span>'
+               + '<strong>'+escapeHTML(r.title)+'</strong>'
+               + '<div class="meta small">'+fmtDate(r.doneAt)+' • D-'+r.dValue+'</div>'
+               + '</div></div>';
+        }).join('');
+        return head + body;
+      }).join('');
+      return '<div class="category" data-cat="'+cat+'">'+catHead(cat)+blocks+'</div>';
+    }).join('');
+    html += '</div></section>';
+    view.innerHTML = html;
+  }
 
-      const directGoals = state.items.filter(x => x.cat===cat && x.type==='goal' && !x.parentId);
-      for (const g of directGoals) {
-        const row = document.createElement('div');
-        row.className = 'goal';
-        row.setAttribute('data-item-id', g.id);
-        row.innerHTML = `<div class="goal-left">
-          <div class="badge">목표</div>
-          <strong class="g-title">${g.title}</strong>
-          <div class="meta g-detail">${g.detail||''}</div>
-          <div class="meta g-meta">등록: ${fmtDate(g.createdAt)}</div>
-        </div>
-        <div class="goal-right">
-          <button class="done-btn">달성</button>
-          <button class="del-btn danger">삭제</button>
-        </div>`;
-        row.querySelector('.done-btn').addEventListener('click', () => markDone(g.id));
-        row.querySelector('.del-btn').addEventListener('click', () => deleteItem(g.id));
-        catBox.appendChild(row);
-      }
+  function renderProgress(){
+    var html = '<section class="page page-progress"><div class="card"><h2>진행현황</h2>';
+    html += CATS.map(function(cat){
+      var subs = state.items.filter(function(x){ return x.cat===cat && x.type==='sub'; });
+      var directGoals = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && !x.parentId; });
+      return '<div class="category" data-cat="'+cat+'">'
+        + catHead(cat)
+        + subs.map(function(st){
+            var goalsUnder = state.items.filter(function(x){ return x.cat===cat && x.type==='goal' && x.parentId===st.id; });
+            return '<div class="subtopic chip"><span class="badge">소주제</span><strong>'+escapeHTML(st.title)+'</strong>'
+                 + (st.detail? ' <span class="meta small">'+escapeHTML(st.detail)+'</span>' : '')
+                 + '</div>'
+                 + goalsUnder.map(function(g){ return goalRowReadOnly(g,true); }).join('');
+          }).join('')
+        + directGoals.map(function(g){ return goalRowReadOnly(g,false); }).join('')
+      + '</div>';
+    }).join('');
+    html += '</div></section>';
+    view.innerHTML = html;
+  }
 
-      fullTree.appendChild(catBox);
+  function renderSettings(){
+    var d = Number(state.config.todayD||0);
+    var html = ''
+    + '<section class="page page-settings">'
+    +   '<div class="card">'
+    +     '<h2>설정</h2>'
+    +     '<div class="form-grid">'
+    +       '<label>메인 배너 이미지<input id="coverFile" type="file" accept="image/*"></label>'
+    +       '<div class="imgBox"><img id="coverPreview" alt="미리보기" style="display:'+(state.config.coverDataUrl?'block':'none')+'"></div>'
+    +       '<label>오늘 기준 D-값<input id="todayD" type="number" min="0" max="99" value="'+d+'"></label>'
+    +       '<div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>'
+    +     '</div>'
+    +   '</div>'
+    + '</section>';
+    view.innerHTML = html;
+
+    var coverFile = $('#coverFile');
+    var coverPreview = $('#coverPreview');
+    if (state.config.coverDataUrl){
+      coverPreview.src = state.config.coverDataUrl;
+      coverPreview.style.width='120px';
+      coverPreview.style.height='120px';
+      coverPreview.style.objectFit='cover';
+      coverPreview.style.borderRadius='12px';
+      coverPreview.style.border='1px solid var(--line)';
+    }
+    if (coverFile){
+      coverFile.addEventListener('change', function(e){
+        var f = e.target.files && e.target.files[0];
+        if (!f) return;
+        var reader = new FileReader();
+        reader.onload = function(){
+          state.config.coverDataUrl = String(reader.result||'');
+          save(state);
+          coverPreview.src = state.config.coverDataUrl;
+          coverPreview.style.display = 'block';
+        };
+        reader.readAsDataURL(f);
+      });
+    }
+    var saveBtn = $('#saveSettingsBtn');
+    if (saveBtn){
+      saveBtn.addEventListener('click', function(){
+        var v = Number(($('#todayD')||{}).value || 0);
+        state.config.todayD = v;
+        save(state);
+        toast('설정이 적용되었습니다.');
+      });
     }
   }
 
-  // ---- Completed (원본) ----
-  function fillCycleSelect() {
-    cycleSelect.innerHTML = '';
-    const start = effectiveStartDate();
-    if (!start) return;
-    const nowIdx = Math.max(0, currentCycleIndexComputed());
-    for (let i=0; i<=nowIdx; i++) {
-      const r = cycleRange(i);
-      const opt = document.createElement('option');
-      opt.value = String(i);
-      opt.textContent = `${i+1}번째 100일 (${isoDay(r.from)}~${isoDay(r.to)})`;
-      cycleSelect.appendChild(opt);
-    }
-    const want = String(Math.max(1, Number(state.config.currentCycleN||1)) - 1);
-    cycleSelect.value = [...cycleSelect.options].some(o=>o.value===want) ? want : String(nowIdx);
-  }
-  function updateCompletedHeader() {
-    const dval = effectiveStartDate() ? dValueFor(new Date()) : '??';
-    const n = Math.max(1, Number(state.config.currentCycleN||1));
-    completedHeaderD.textContent = `D-${dval} (${n}번째 100일)`;
-    completedTitle.textContent = `사이클별 완료기록 (${n}번째)`;
-  }
-  function renderCompleted() {
-    updateCompletedHeader();
-    const n = Math.max(1, Number(state.config.currentCycleN||1));
-    const idx = n - 1;
-    const rows = state.achievements.filter(a => a.cycleIndex === idx)
-      .sort((a,b)=> new Date(a.doneAt) - new Date(b.doneAt));
-    completedList.innerHTML = '';
-    if (!rows.length) { completedList.innerHTML = `<p class="meta">이 사이클에 달성 기록이 없습니다.</p>`; return; }
-    const itemMap = Object.fromEntries(state.items.map(i=>[i.id,i]));
-    const byCat = {};
-    for (const r of rows) {
-      const it = itemMap[r.itemId]; if (!it) continue;
-      const cat = it.cat;
-      const subId = it.parentId || 0;
-      byCat[cat] ||= {};
-      byCat[cat][subId] ||= [];
-      byCat[cat][subId].push({title: it.title, doneAt: r.doneAt, dValue: r.dValue});
-    }
-    for (const cat of Object.keys(byCat)) {
-      const catDiv = document.createElement('div');
-      catDiv.className = 'category';
-      catDiv.innerHTML = `<h3>${cat}</h3>`;
-      const subs = byCat[cat];
-      for (const subIdStr of Object.keys(subs)) {
-        const subId = Number(subIdStr);
-        if (subId) {
-          const st = state.items.find(i=>i.id===subId);
-          const subHeader = document.createElement('div');
-          subHeader.className = 'chip';
-          subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${st?st.title:'(소주제)'}</strong>`;
-          catDiv.appendChild(subHeader);
-        }
-        for (const g of subs[subIdStr]) {
-          const row = document.createElement('div');
-          row.className = 'goal' + (subId ? ' sub-goal-indent' : '');
-          row.innerHTML = `<div><div class="badge">목표</div>
-            <strong>${g.title}</strong>
-            <div class="meta">${fmtDate(g.doneAt)} • D-${g.dValue}</div></div>`;
-          catDiv.appendChild(row);
-        }
-      }
-      completedList.appendChild(catDiv);
+  // ---------- Render switch ----------
+  function render(){
+    switch (currentPage){
+      case 'home': renderHome(); break;
+      case 'history': renderHistory(); break;
+      case 'progress': renderProgress(); break;
+      case 'settings': renderSettings(); break;
+      default: renderHome();
     }
   }
 
-  // ---- Overview (원본) ----
-  function renderOverview() {
-    const wrap = document.getElementById('overviewTree');
-    if (!wrap) return;
-    wrap.innerHTML = '';
-    for (const cat of FIXED_CATS) {
-      const catBox = document.createElement('div');
-      catBox.className = 'category';
-      const head = document.createElement('div');
-      head.className = 'cat-head';
-      head.innerHTML = `<h3>${cat}</h3>`;
-      catBox.appendChild(head);
-
-      const subs = state.items.filter(x => x.cat===cat && x.type==='sub');
-      for (const st of subs) {
-        const chip = document.createElement('div');
-        chip.className = 'subtopic chip';
-        chip.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}`;
-        catBox.appendChild(chip);
-
-        const goalsUnder = state.items.filter(x => x.cat===cat && x.type==='goal' && x.parentId===st.id);
-        for (const g of goalsUnder) {
-          const row = document.createElement('div');
-          row.className = 'goal sub-goal-indent';
-          row.innerHTML = `<div class="badge">목표</div> ${g.title}`;
-          catBox.appendChild(row);
-        }
-      }
-
-      const directGoals = state.items.filter(x => x.cat===cat && x.type==='goal' && !x.parentId);
-      for (const g of directGoals) {
-        const row = document.createElement('div');
-        row.className = 'goal';
-        row.innerHTML = `<div class="badge">목표</div> ${g.title}`;
-        catBox.appendChild(row);
-      }
-
-      wrap.appendChild(catBox);
-    }
+  // ---------- SW(optional) ----------
+  if ('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      try { navigator.serviceWorker.register('./sw.js'); } catch(e){}
+    });
   }
 
-  // ---- Home + All (원본) ----
-  function renderHome() {
-    renderBanner();
-    fillQuickSelectors();
-    renderFullTree();
-  }
-  function renderAll() {
-    renderHeader();
-    renderHome();
-    fillCycleSelect();
-    renderCompleted();
-    renderOverview();
-  }
-  renderAll();
+  // first paint
+  render();
 })();
