@@ -1,20 +1,22 @@
-// v6-optimistic-patch2: subtopic edit, robust mapping, full-image banner
+// v6-optimistic-patch2-final: settings flow, full-bleed banner, cycle auto, orphan cleanup
 (() => {
-  // ---- Tabs (unchanged) ----
+  // ---- Tabs ----
   const tabs = document.querySelectorAll('header .tabs button');
   const pages = document.querySelectorAll('.page');
   tabs.forEach(btn => btn.addEventListener('click', () => {
     tabs.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     pages.forEach(p => p.classList.remove('active'));
-    document.getElementById('page-' + btn.dataset.tab).classList.add('active');
+    const page = document.getElementById('page-' + btn.dataset.tab);
+    if (page) page.classList.add('active');
+
     if (btn.dataset.tab === 'completed') { fillCycleSelect(); renderCompleted(); updateCompletedHeader(); }
     if (btn.dataset.tab === 'overview') { renderOverview(); }
     if (btn.dataset.tab === 'home') { renderHome(); }
     if (btn.dataset.tab === 'settings') { fillSettings(); }
   }));
 
-  // ---- SW (unchanged) ----
+  // ---- SW ----
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
   }
@@ -26,8 +28,8 @@
   function save(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
   function initState() {
     const s = load();
-    s.config ||= { startDate: '', useDday: false, todayD: 0, currentCycleN: 1, coverDataUrl: '' };
-    s.items ||= []; // {id, cat, type:'goal'|'sub', title, detail, parentId?, createdAt}
+    s.config ||= { startDate: '', useDday: false, todayD: 0, currentCycleN: 1, coverDataUrl: '', bannerFit: 'cover' };
+    s.items ||= [];        // {id, cat, type:'goal'|'sub', title, detail, parentId?, createdAt}
     s.achievements ||= []; // {id, itemId, cycleIndex, doneAt, dValue}
     s.seq ||= 1;
     save(s);
@@ -35,7 +37,7 @@
   }
   let state = initState();
 
-  // ---- DOM ----
+  // ---- DOM helpers ----
   const $ = (id) => document.getElementById(id);
   const headerTitle = $('headerTitle');
   const banner = $('banner');
@@ -50,18 +52,21 @@
   const completedList = $('completedList');
   const completedHeaderD = $('completedHeaderD');
   const completedTitle = $('completedTitle');
+
+  // settings elements (may be null if HTML not ready; guarded in code)
   const startDate = $('startDate');
   const coverFile = $('coverFile');
   const useDday = $('useDday');
   const todayD = $('todayD');
   const currentCycleN = $('currentCycleN');
   const coverPreview = $('coverPreview');
+  const bannerFit = $('bannerFit'); // optional <select> 'cover'|'contain'
+  const saveSettingsBtn = $('saveSettingsBtn');
 
   // ---- Utils ----
-  function daysBetween(a, b) {
-    const MS = 24*60*60*1000;
-    return Math.floor((b - a) / MS);
-  }
+  const MS_DAY = 86400000;
+  const pad2 = (n)=> String(n).padStart(2,'0');
+  function daysBetween(a, b) { return Math.floor((b - a) / MS_DAY); }
   function effectiveStartDate() {
     if (state.config.useDday) {
       const d = new Date(); d.setHours(0,0,0,0);
@@ -81,36 +86,47 @@
   function dValueFor(date) {
     const start = effectiveStartDate();
     if (!start) return 0;
-    const d = daysBetween(start, new Date(new Date(date).setHours(0,0,0,0)));
+    const day0 = new Date(date); day0.setHours(0,0,0,0);
+    const d = daysBetween(start, day0);
     return Math.max(0, d % 100);
   }
   function cycleRange(idx) {
     const start = effectiveStartDate();
     if (!start) return null;
-    const from = new Date(start.getTime() + (idx*100)*86400000);
-    const to = new Date(from.getTime() + 100*86400000 - 1);
+    const from = new Date(start.getTime() + (idx*100)*MS_DAY);
+    const to = new Date(from.getTime() + 100*MS_DAY - 1);
     return {from, to};
   }
-  const fmtDate = (d)=> new Date(d).toLocaleString();
-  const isoDay = (d)=> d.toISOString().slice(0,10);
+  const fmtDate = (d) => {
+    const dd = new Date(d);
+    const Y = dd.getFullYear(), M = pad2(dd.getMonth()+1), D = pad2(dd.getDate());
+    const h = pad2(dd.getHours()), m = pad2(dd.getMinutes());
+    return `${Y}-${M}-${D} ${h}:${m}`;
+  };
+  const isoDay = (d)=> `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 
   // ---- Header + Banner ----
   function renderHeader() {
+    if (!headerTitle) return;
     const start = effectiveStartDate();
     headerTitle.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
   }
   function renderBanner() {
+    if (!banner) return;
     const dataUrl = state.config.coverDataUrl || '';
     banner.style.backgroundImage = dataUrl ? `url('${dataUrl}')` : 'none';
-    banner.style.backgroundSize = 'contain'; // show whole image
+    banner.style.backgroundSize = (state.config.bannerFit || 'cover'); // full-bleed by default
     banner.style.backgroundPosition = 'center';
     banner.style.backgroundRepeat = 'no-repeat';
-    const start = effectiveStartDate();
-    todayDbox.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
+    if (todayDbox) {
+      const start = effectiveStartDate();
+      todayDbox.textContent = start ? `D-${dValueFor(new Date())}` : 'D-??';
+    }
   }
 
   // ---- Quick selectors ----
   function fillQuickSelectors() {
+    if (!quickCat) return;
     quickCat.innerHTML = '';
     for (const c of FIXED_CATS) {
       const opt = document.createElement('option');
@@ -119,6 +135,7 @@
     updateParentSubSelect();
   }
   function updateParentSubSelect() {
+    if (!quickParent || !quickCat) return;
     const cat = quickCat.value;
     quickParent.innerHTML = '<option value="">(카테고리 직속)</option>';
     const subs = state.items.filter(x => x.cat===cat && x.type==='sub');
@@ -129,7 +146,7 @@
       quickParent.appendChild(o);
     }
   }
-  quickCat.addEventListener('change', updateParentSubSelect);
+  quickCat?.addEventListener('change', updateParentSubSelect);
 
   // ---- Optimistic helpers ----
   function goalRowHTML(g) {
@@ -151,6 +168,7 @@
     if (delBtn) delBtn.addEventListener('click', () => deleteItem(g.id));
   }
   function findCatBoxByAttr(cat) {
+    if (!fullTree) return null;
     const cats = fullTree.querySelectorAll('.category');
     for (const el of cats) {
       if (el.getAttribute('data-cat') === cat) return el;
@@ -174,8 +192,8 @@
       subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${newItem.title}</strong>${newItem.detail?` <span class="meta">${newItem.detail}</span>`:''}
         <button class="edit-sub" style="margin-left:6px">수정</button>
         <button class="del-sub danger" style="margin-left:6px">삭제</button>`;
-      subHeader.querySelector('.edit-sub').addEventListener('click', () => editSubtopic(newItem.id));
-      subHeader.querySelector('.del-sub').addEventListener('click', () => deleteItem(newItem.id));
+      subHeader.querySelector('.edit-sub')?.addEventListener('click', () => editSubtopic(newItem.id));
+      subHeader.querySelector('.del-sub')?.addEventListener('click', () => deleteItem(newItem.id));
       catBox.appendChild(subHeader);
       return;
     }
@@ -197,16 +215,17 @@
   }
 
   // ---- Add (immediate show) ----
-  $('quickAdd').addEventListener('click', () => {
+  $('quickAdd')?.addEventListener('click', () => {
+    if (!quickCat || !quickType || !quickTitle) return;
     const cat = quickCat.value;
     const type = quickType.value;
     const title = quickTitle.value.trim();
-    const detail = quickDetail.value.trim();
+    const detail = (quickDetail?.value || '').trim();
     if (!cat) return alert('카테고리를 선택하세요.');
     if (!title) return alert('제목을 입력하세요.');
 
     const item = { id: state.seq++, cat, type, title, detail, createdAt: new Date().toISOString() };
-    if (type==='goal') {
+    if (type==='goal' && quickParent) {
       const pid = quickParent.value ? Number(quickParent.value) : null;
       if (pid) item.parentId = pid;
     }
@@ -215,7 +234,8 @@
 
     insertOptimistic(cat, item);
 
-    quickTitle.value=''; quickDetail.value='';
+    if (quickTitle) quickTitle.value='';
+    if (quickDetail) quickDetail.value='';
     updateParentSubSelect();
 
     requestAnimationFrame(() => {
@@ -233,7 +253,7 @@
     const t = newTitle.trim();
     if (!t) return alert('제목을 입력하세요.');
     it.title = t;
-    // (선택) 상세 수정도 지원하고 싶으면 아래 주석 해제
+    // 상세도 수정하려면 아래 주석 해제
     // const newDetail = prompt('설명(선택)', it.detail || '');
     // if (newDetail !== null) it.detail = newDetail.trim();
     save(state);
@@ -247,8 +267,11 @@
     if (!start) return alert('설정에서 시작일 또는 D값을 먼저 저장하세요.');
     const now = new Date();
     const dval = dValueFor(now);
-    const idxBySetting = Math.max(1, Number(state.config.currentCycleN||1)) - 1;
-    const rec = { id: state.seq++, itemId, cycleIndex: idxBySetting, doneAt: now.toISOString(), dValue: dval };
+
+    // 사이클 자동 계산(요구 반영)
+    const idxAuto = currentCycleIndexComputed();
+
+    const rec = { id: state.seq++, itemId, cycleIndex: idxAuto, doneAt: now.toISOString(), dValue: dval };
     state.achievements.push(rec); save(state);
     renderCompleted();
     renderFullTree();
@@ -258,18 +281,26 @@
     const item = state.items.find(i=>i.id===itemId);
     if (!item) return;
     if (!confirm(`정말 "${item.title}"을(를) 삭제할까요? 소주제를 삭제하면 하위 목표도 함께 삭제됩니다.`)) return;
+
+    let removedIds = [];
     if (item.type==='sub') {
+      removedIds = state.items.filter(i => i.id===itemId || i.parentId===itemId).map(i=>i.id);
       state.items = state.items.filter(i => !(i.id===itemId || i.parentId===itemId));
     } else {
+      removedIds = [itemId];
       state.items = state.items.filter(i => i.id!==itemId);
     }
+    // 삭제와 동시에 달성기록 고아 데이터 제거(요구 반영)
+    state.achievements = state.achievements.filter(a => !removedIds.includes(a.itemId));
     save(state);
     renderFullTree();
     renderOverview();
+    renderCompleted();
   }
 
   // ---- HOME render (with subtopic edit/delete buttons) ----
   function renderFullTree() {
+    if (!fullTree) return;
     fullTree.innerHTML = '';
     for (const cat of FIXED_CATS) {
       const catBox = document.createElement('div');
@@ -285,8 +316,8 @@
         subHeader.innerHTML = `<span class="badge sub">소주제</span><strong>${st.title}</strong>${st.detail?` <span class="meta">${st.detail}</span>`:''}
           <button class="edit-sub" style="margin-left:6px">수정</button>
           <button class="del-sub danger" style="margin-left:6px">삭제</button>`;
-        subHeader.querySelector('.edit-sub').addEventListener('click', () => editSubtopic(st.id));
-        subHeader.querySelector('.del-sub').addEventListener('click', () => deleteItem(st.id));
+        subHeader.querySelector('.edit-sub')?.addEventListener('click', () => editSubtopic(st.id));
+        subHeader.querySelector('.del-sub')?.addEventListener('click', () => deleteItem(st.id));
         catBox.appendChild(subHeader);
 
         const goalsUnder = state.items.filter(x => x.cat===cat && x.type==='goal' && x.parentId===st.id);
@@ -304,8 +335,8 @@
             <button class="done-btn">달성</button>
             <button class="del-btn danger">삭제</button>
           </div>`;
-          row.querySelector('.done-btn').addEventListener('click', () => markDone(g.id));
-          row.querySelector('.del-btn').addEventListener('click', () => deleteItem(g.id));
+          row.querySelector('.done-btn')?.addEventListener('click', () => markDone(g.id));
+          row.querySelector('.del-btn')?.addEventListener('click', () => deleteItem(g.id));
           catBox.appendChild(row);
         }
       }
@@ -325,8 +356,8 @@
           <button class="done-btn">달성</button>
           <button class="del-btn danger">삭제</button>
         </div>`;
-        row.querySelector('.done-btn').addEventListener('click', () => markDone(g.id));
-        row.querySelector('.del-btn').addEventListener('click', () => deleteItem(g.id));
+        row.querySelector('.done-btn')?.addEventListener('click', () => markDone(g.id));
+        row.querySelector('.del-btn')?.addEventListener('click', () => deleteItem(g.id));
         catBox.appendChild(row);
       }
 
@@ -336,34 +367,44 @@
 
   // ---- Completed ----
   function fillCycleSelect() {
+    if (!cycleSelect) return;
     cycleSelect.innerHTML = '';
     const start = effectiveStartDate();
     if (!start) return;
     const nowIdx = Math.max(0, currentCycleIndexComputed());
     for (let i=0; i<=nowIdx; i++) {
       const r = cycleRange(i);
+      if (!r) continue;
       const opt = document.createElement('option');
       opt.value = String(i);
       opt.textContent = `${i+1}번째 100일 (${isoDay(r.from)}~${isoDay(r.to)})`;
       cycleSelect.appendChild(opt);
     }
+    // 표시용 타이틀은 config.currentCycleN를 유지(사용자 시점 표시), 렌더는 자동 계산 사용
     const want = String(Math.max(1, Number(state.config.currentCycleN||1)) - 1);
     cycleSelect.value = [...cycleSelect.options].some(o=>o.value===want) ? want : String(nowIdx);
   }
   function updateCompletedHeader() {
+    if (!completedHeaderD || !completedTitle) return;
     const dval = effectiveStartDate() ? dValueFor(new Date()) : '??';
     const n = Math.max(1, Number(state.config.currentCycleN||1));
     completedHeaderD.textContent = `D-${dval} (${n}번째 100일)`;
     completedTitle.textContent = `사이클별 완료기록 (${n}번째)`;
   }
   function renderCompleted() {
+    if (!completedList) return;
     updateCompletedHeader();
-    const n = Math.max(1, Number(state.config.currentCycleN||1));
-    const idx = n - 1;
-    const rows = state.achievements.filter(a => a.cycleIndex === idx)
+
+    // 실제 렌더 기준은 "현재 날짜 기반 자동 사이클"로 보여줌
+    const idx = currentCycleIndexComputed();
+
+    const rows = state.achievements
+      .filter(a => a.cycleIndex === idx)
       .sort((a,b)=> new Date(a.doneAt) - new Date(b.doneAt));
+
     completedList.innerHTML = '';
     if (!rows.length) { completedList.innerHTML = `<p class="meta">이 사이클에 달성 기록이 없습니다.</p>`; return; }
+
     const itemMap = Object.fromEntries(state.items.map(i=>[i.id,i]));
     const byCat = {};
     for (const r of rows) {
@@ -442,6 +483,40 @@
     }
   }
 
+  // ---- Settings: fill & save ----
+  function fillSettings() {
+    if (startDate) startDate.value = state.config.startDate || '';
+    if (useDday) useDday.checked = !!state.config.useDday;
+    if (todayD) todayD.value = String(state.config.todayD ?? 0);
+    if (currentCycleN) currentCycleN.value = String(state.config.currentCycleN ?? 1);
+    if (coverPreview) coverPreview.src = state.config.coverDataUrl || '';
+    if (bannerFit) bannerFit.value = state.config.bannerFit || 'cover';
+  }
+  function saveSettings() {
+    if (startDate) state.config.startDate = startDate.value || '';
+    if (useDday) state.config.useDday = !!useDday.checked;
+    if (todayD) state.config.todayD = Number(todayD.value || 0);
+    if (currentCycleN) state.config.currentCycleN = Math.max(1, Number(currentCycleN.value || 1));
+    if (bannerFit) state.config.bannerFit = bannerFit.value || 'cover';
+    save(state);
+    alert('설정이 적용되었습니다.');
+    renderAll();
+  }
+  saveSettingsBtn?.addEventListener('click', saveSettings);
+
+  coverFile?.addEventListener('change', (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.config.coverDataUrl = String(reader.result || '');
+      save(state);
+      if (coverPreview) coverPreview.src = state.config.coverDataUrl;
+      renderBanner();
+    };
+    reader.readAsDataURL(f);
+  });
+
   // ---- Home + All ----
   function renderHome() {
     renderBanner();
@@ -455,5 +530,7 @@
     renderCompleted();
     renderOverview();
   }
+
+  // Initial paint
   renderAll();
 })();
