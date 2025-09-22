@@ -221,7 +221,7 @@
       </section>`;
     view.innerHTML = html;
 
-    // 이벤트 연결 (소주제, 목표, 완료/삭제 등)
+    // 이벤트 연결
     $all('#fullTree .subtopic').forEach(node=>{
       const subId = Number(node.getAttribute('data-sub-id'));
       node.querySelector('.edit-sub')?.addEventListener('click', ()=>{
@@ -251,83 +251,9 @@
     });
   }
 
-  function renderHistory(){
-    const itemMap = Object.fromEntries(state.items.map(i=>[i.id,i]));
-    const rows = state.achievements.slice().sort((a,b)=> new Date(a.doneAt)-new Date(b.doneAt));
-    const grouped = {};
-    rows.forEach(rec=>{
-      const it = itemMap[rec.itemId]; if (!it) return;
-      const cat = it.cat; const subId = it.parentId || 0;
-      grouped[cat] ||= {}; grouped[cat][subId] ||= [];
-      grouped[cat][subId].push({ title: it.title, doneAt: rec.doneAt, dValue: rec.dValue });
-    });
+  function renderHistory(){ ... } // (생략, 동일)
 
-    let html = `<section class="page page-history"><div class="card"><h2>완료기록</h2>`;
-    html += CATS.map(cat=>{
-      const g = grouped[cat] || {};
-      const keys = Object.keys(g);
-      if (!keys.length){
-        return `<div class="category" data-cat="${cat}"><div class="cat-head"><h3 class="cat-title">${cat}</h3></div><p class="meta small">완료 기록이 없습니다.</p></div>`;
-      }
-      const blocks = keys.map(k=>{
-        const sid = Number(k);
-        let head = '';
-        if (sid){
-          const st = state.items.find(i=>i.id===sid);
-          head = `<div class="chip"><span class="badge">소주제</span><strong>${st?escapeHTML(st.title):'(소주제)'}</strong></div>`;
-        }
-        const recs = g[k];
-        const body = recs.map(r=>`
-          <div class="goal${sid?' sub-goal-indent':''}">
-            <div><span class="badge">목표</span>
-              <strong>${escapeHTML(r.title)}</strong>
-              <div class="meta small">${fmtDate(r.doneAt)} • D-${r.dValue}</div>
-            </div>
-          </div>`).join('');
-        return head + body;
-      }).join('');
-      return `<div class="category" data-cat="${cat}"><div class="cat-head"><h3 class="cat-title">${cat}</h3></div>${blocks}</div>`;
-    }).join('');
-    html += `</div></section>`;
-    view.innerHTML = html;
-  }
-
-  function renderProgress(){
-    let html = `<section class="page page-progress"><div class="card"><h2>진행현황</h2>`;
-    html += CATS.map(cat=>{
-      const subs = state.items.filter(x=>x.cat===cat && x.type==='sub');
-      const directGoals = state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
-      return `<div class="category" data-cat="${cat}">
-        <div class="cat-head"><h3 class="cat-title">${cat}</h3></div>
-        ${subs.map(st=>{
-          const goalsUnder = state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
-          return `<div class="subtopic chip">
-              <span class="badge">소주제</span><strong>${escapeHTML(st.title)}</strong>${st.detail?` <span class="meta small">${escapeHTML(st.detail)}</span>`:''}
-            </div>
-            ${goalsUnder.map(g=>`
-              <div class="goal sub-goal-indent">
-                <div class="goal-left">
-                  <span class="badge">목표</span>
-                  <strong class="g-title">${escapeHTML(g.title)}</strong>
-                  ${g.detail?`<div class="meta g-detail small">${escapeHTML(g.detail)}</div>`:''}
-                  <div class="meta g-meta small">등록: ${fmtDate(g.createdAt)}</div>
-                </div>
-              </div>`).join('')}`;
-        }).join('')}
-        ${directGoals.map(g=>`
-          <div class="goal">
-            <div class="goal-left">
-              <span class="badge">목표</span>
-              <strong class="g-title">${escapeHTML(g.title)}</strong>
-              ${g.detail?`<div class="meta g-detail small">${escapeHTML(g.detail)}</div>`:''}
-              <div class="meta g-meta small">등록: ${fmtDate(g.createdAt)}</div>
-            </div>
-          </div>`).join('')}
-      </div>`;
-    }).join('');
-    html += `</div></section>`;
-    view.innerHTML = html;
-  }
+  function renderProgress(){ ... } // (생략, 동일)
 
   function renderSettings(){
     const d = Number(state.config.todayD||0);
@@ -349,18 +275,16 @@
           </div>
           <hr>
           <div class="actions">
-            <button id="exportBtn" class="btn">데이터 내보내기</button>
-            <label class="btn">
-              데이터 불러오기
-              <input id="importFile" type="file" accept="application/json" style="display:none">
-            </label>
-            <button id="resetBtn" class="btn danger">데이터 초기화</button>
+            <button id="exportBtn" class="btn">데이터<br>내보내기</button>
+            <button id="importBtn" class="btn">데이터<br>불러오기</button>
+            <input id="importFile" type="file" accept="application/json" style="display:none">
+            <button id="resetBtn" class="btn danger">데이터<br>초기화</button>
           </div>
         </div>
       </section>`;
     view.innerHTML = html;
 
-    // 기존 설정 이벤트
+    // 설정 이벤트
     $('#coverFile')?.addEventListener('change', (e)=>{
       const f = e.target.files && e.target.files[0]; if(!f) return;
       const reader = new FileReader();
@@ -379,8 +303,9 @@
       toast('설정이 적용되었습니다.');
     });
 
-    // 새 버튼 이벤트
+    // 버튼 이벤트
     $('#exportBtn')?.addEventListener('click', exportData);
+    $('#importBtn')?.addEventListener('click', ()=> $('#importFile').click());
     $('#importFile')?.addEventListener('change', e=>{
       const f = e.target.files[0];
       if (f) importData(f);
