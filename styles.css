@@ -1,4 +1,4 @@
-/* ======= D-트래커 스타일 (세트 맞춤 교체본) ======= */
+/* ======= D-트래커 스타일 (수정본) ======= */
 
 /* Reset & Base */
 *{box-sizing:border-box}
@@ -28,20 +28,27 @@ html,body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,Segoe 
 body{background:var(--bg);color:var(--ink)}
 
 /* Layout */
-.topbar{
-  position:sticky;top:0;z-index:10;
-  background:var(--brand);color:#fff;
-  padding:12px 16px;display:flex;align-items:center;justify-content:space-between
-}
-h1{font-size:20px;margin:0}
-h2{font-size:18px;margin:0 0 12px}
-h3{margin:8px 0}
 .container{max-width:920px;margin:24px auto;padding:0 16px}
 
 /* Tabs */
-.tabs{position:sticky;top:52px;background:var(--card);border-bottom:1px solid var(--line);display:flex}
-.tab{flex:1;padding:12px;border:none;background:transparent;color:var(--ink);font-weight:700;cursor:pointer}
-.tab.active{background:var(--bg);border-bottom:2px solid var(--brand)}
+.tabs{
+  background:var(--card);
+  border-bottom:1px solid var(--line);
+  display:flex;
+}
+.tab{
+  flex:1;
+  padding:12px;
+  border:none;
+  background:transparent;
+  color:var(--ink);
+  font-weight:700;
+  cursor:pointer;
+}
+.tab.active{
+  background:var(--bg);
+  border-bottom:2px solid var(--brand)
+}
 
 /* Common UI */
 .btn{
