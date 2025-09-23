@@ -96,6 +96,29 @@
     return Math.floor((au - bu)/86400000);
   }
 
+  // === [ADD] 로컬 날짜 유틸 & 현재 보이는 D 계산 ===
+  function ymdLocal(d = new Date()){
+    const y = d.getFullYear(), m = d.getMonth()+1, dd = d.getDate();
+    const pad = n => String(n).padStart(2,'0');
+    return `${y}-${pad(m)}-${pad(dd)}`; // 로컬 기준 YYYY-MM-DD
+  }
+  function dateFromYmdLocal(s){
+    const [y,m,d] = (s||'').split('-').map(Number);
+    return new Date(y || 1970, (m||1)-1, d || 1); // 로컬 자정
+  }
+  function diffDaysLocal(a, b){ // a,b: Date
+    const da = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+    const db = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+    return Math.round((da - db) / 86400000);
+  }
+  function currentD(){
+    const base = dateFromYmdLocal(state.config.baseDate || ymdLocal());
+    const today = new Date();
+    const passed = diffDaysLocal(today, base);
+    return Math.max(0, Number(state.config.todayD||0) - passed);
+  }
+  // === [/ADD] ===
+
   // ---------- Data ops ----------
   function addSub({cat,title,detail}){
     const it={id:state.seq++,cat,type:'sub',title,detail:detail||'',createdAt:nowISO()};
@@ -125,7 +148,9 @@
   }
   function completeGoal(itemId){
     const it = state.items.find(x=>x.id===itemId && x.type==='goal'); if(!it) return;
-    const rec = { id: state.seq++, itemId, doneAt: nowISO(), dValue: Number(state.config.todayD||0) };
+    // === [REPLACE] 완료 기록에 저장하는 D값: 현재 화면에 보이는 D로 저장 ===
+    const rec = { id: state.seq++, itemId, doneAt: nowISO(), dValue: currentD() };
+    // === [/REPLACE] ===
     state.achievements.push(rec); save(state);
   }
 
@@ -285,12 +310,9 @@
 
   // ---------- Pages ----------
   function renderHome(){
-    // D-day 자동 계산 (저장한 날 기준으로 매일 감소)
-    let baseDate = new Date(state.config.baseDate || '');
-    if (isNaN(baseDate.getTime())) baseDate = new Date();
-    const today = new Date();
-    const diff = diffDaysUTC(today, baseDate);
-    const d = Math.max(0, (Number(state.config.todayD||0) - diff));
+    // === [REPLACE] D-day 계산을 현재 보이는 값으로 통일 ===
+    const d = currentD();
+    // === [/REPLACE] ===
 
     const bannerStyle = state.config.coverDataUrl
       ? `style="background-image:url('${state.config.coverDataUrl}');background-size:cover;background-position:center;background-repeat:no-repeat;"`
@@ -536,7 +558,9 @@
 
     $('#saveSettingsBtn')?.addEventListener('click', ()=>{
       state.config.todayD = Number(($('#todayD')||{}).value || 0);
-      state.config.baseDate = new Date().toISOString().slice(0,10); // 저장 누른 날을 기준일로
+      // === [REPLACE] 기준일을 로컬 YYYY-MM-DD로 저장 (UTC 금지) ===
+      state.config.baseDate = ymdLocal(new Date());
+      // === [/REPLACE] ===
       save(state);
       toast('설정이 적용되었습니다.');
     });
