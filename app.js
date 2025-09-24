@@ -14,6 +14,8 @@
     if (typeof s.config.todayD !== 'number') s.config.todayD = 0;
     // 저장 버튼을 누르기 전에는 todayD를 있는 그대로 보여주기 위해 기본 baseDate를 오늘로 둠
     if (typeof s.config.baseDate !== 'string') s.config.baseDate = new Date().toISOString().slice(0,10);
+    // [ADD] 100일 목표 기본값
+    if (typeof s.config.goal100 !== 'string') s.config.goal100 = '';
     if (!Array.isArray(s.items)) s.items = [];        // {id, cat, type:'sub'|'goal', title, detail?, parentId?, createdAt}
     if (!Array.isArray(s.achievements)) s.achievements = []; // {id, itemId, doneAt, dValue}
     if (typeof s.seq !== 'number') s.seq = 1;
@@ -96,7 +98,7 @@
     return Math.floor((au - bu)/86400000);
   }
 
-  // === [ADD] 로컬 날짜 유틸 & 현재 보이는 D 계산 ===
+  // === 로컬 날짜 유틸 & 현재 보이는 D 계산 (이미 추가됨) ===
   function ymdLocal(d = new Date()){
     const y = d.getFullYear(), m = d.getMonth()+1, dd = d.getDate();
     const pad = n => String(n).padStart(2,'0');
@@ -117,7 +119,6 @@
     const passed = diffDaysLocal(today, base);
     return Math.max(0, Number(state.config.todayD||0) - passed);
   }
-  // === [/ADD] ===
 
   // ---------- Data ops ----------
   function addSub({cat,title,detail}){
@@ -148,9 +149,7 @@
   }
   function completeGoal(itemId){
     const it = state.items.find(x=>x.id===itemId && x.type==='goal'); if(!it) return;
-    // === [REPLACE] 완료 기록에 저장하는 D값: 현재 화면에 보이는 D로 저장 ===
     const rec = { id: state.seq++, itemId, doneAt: nowISO(), dValue: currentD() };
-    // === [/REPLACE] ===
     state.achievements.push(rec); save(state);
   }
 
@@ -310,17 +309,29 @@
 
   // ---------- Pages ----------
   function renderHome(){
-    // === [REPLACE] D-day 계산을 현재 보이는 값으로 통일 ===
+    // D-day 계산 (현재 보이는 값으로 통일)
     const d = currentD();
-    // === [/REPLACE] ===
 
     const bannerStyle = state.config.coverDataUrl
       ? `style="background-image:url('${state.config.coverDataUrl}');background-size:cover;background-position:center;background-repeat:no-repeat;"`
       : '';
+
+    // [ADD] 100일 목표 카드 (D-박스 아래)
+    const goal100 = String(state.config.goal100 || '').trim();
+    const goal100Box = `
+      <div class="card" id="goal100Box">
+        <h2>이번 100일에 이뤄낼 목표</h2>
+        ${goal100
+          ? `<div class="small" style="white-space:pre-wrap;">${escapeHTML(goal100)}</div>`
+          : `<p class="small">설정 탭에서 목표를 입력하세요.</p>`}
+      </div>`;
+
     const html = `
       <section class="page page-home">
         <div id="banner" ${bannerStyle}></div>
         <div id="todayDbox" class="center-d">D-${d}</div>
+
+        ${goal100Box}
 
         <div class="card">
           <div id="fullTree">
@@ -525,6 +536,14 @@
             <label>오늘 기준 D-값
               <input id="todayD" type="number" min="0" max="9999" value="${d}">
             </label>
+
+            <!-- [ADD] 이번 100일 목표 작성칸 -->
+            <label>이번 100일에 이뤄낼 목표
+              <textarea id="goal100Text" class="input" rows="6" placeholder="예: 100일 동안 꾸준히 ○○을 달성하기">
+${escapeHTML(state.config.goal100 || '')}
+              </textarea>
+            </label>
+
             <div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>
           </div>
           <hr>
@@ -558,9 +577,10 @@
 
     $('#saveSettingsBtn')?.addEventListener('click', ()=>{
       state.config.todayD = Number(($('#todayD')||{}).value || 0);
-      // === [REPLACE] 기준일을 로컬 YYYY-MM-DD로 저장 (UTC 금지) ===
-      state.config.baseDate = ymdLocal(new Date());
-      // === [/REPLACE] ===
+      state.config.baseDate = ymdLocal(new Date()); // 로컬 YYYY-MM-DD
+      // [ADD] 100일 목표 저장
+      const ta = $('#goal100Text');
+      state.config.goal100 = ta ? String(ta.value || '').trim() : state.config.goal100;
       save(state);
       toast('설정이 적용되었습니다.');
     });
