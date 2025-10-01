@@ -65,6 +65,7 @@ body{background:var(--bg);color:var(--ink)}
 .mini-btn.danger{border-color:transparent;background:rgba(214,74,74,.12);color:var(--danger)}
 .mini-btn.done-btn{border-color:transparent;background:rgba(46,160,67,.12);color:var(--ok)}
 
+/* Inputs */
 .input, input[type="date"], input[type="number"], input[type="text"], select{
   width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);
   background:transparent;color:var(--ink)
@@ -107,6 +108,9 @@ label{display:flex;flex-direction:column;gap:6px}
 .cat-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .cat-title{font-size:16px}
 
+/* [ADD] 접힘 동작: 접힌 카테고리의 본문 숨김 */
+.category.collapsed .cat-body{display:none;} /* [ADD] */
+
 /* Subtopic chip */
 .chip{
   display:flex;align-items:center;gap:8px;
@@ -133,6 +137,15 @@ label{display:flex;flex-direction:column;gap:6px}
 .badge{
   display:inline-flex;align-items:center;justify-content:center;
   font-size:12px;font-weight:700;padding:4px 8px;border-radius:8px;background:var(--badge-bg);color:inherit
+}
+
+/* [ADD] 카테고리별 100일 목표 표시 박스 */
+.cat-goal{ /* [ADD] */
+  background:var(--chip-bg);
+  border-radius:10px;
+  padding:8px 10px;
+  border-left:3px solid var(--line);
+  white-space:pre-wrap;
 }
 
 /* Images (settings preview) */
