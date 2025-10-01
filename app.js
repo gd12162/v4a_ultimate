@@ -368,18 +368,22 @@
               const collapsed = !!state.ui.collapsedCats[cat];
               const subs = state.items.filter(x=>x.cat===cat && x.type==='sub');
               const directGoals = state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
+
+              // 카테고리별 100일 목표(헤더 바로 아래, 접힘과 무관하게 항상 표시)
+              const goalTxt = (state.config.catGoals && state.config.catGoals[cat]) ? String(state.config.catGoals[cat]).trim() : '';
+              const catGoalHtml = goalTxt ? `<div class="cat-goal small" style="margin:8px 0;">${escapeHTML(goalTxt)}</div>` : '';
+
+              // 접힘 대상 본문은 소주제/목표만 포함
               const bodyHtml = `
                 ${subs.map(st=>{
                   const goalsUnder = state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
                   return `${subChipHTML(st)}${goalsUnder.map(g=>goalRowHTML(g,true)).join('')}`;
                 }).join('')}
                 ${directGoals.map(g=>goalRowHTML(g,false)).join('')}
-                ${ (state.config.catGoals[cat] || '').trim()
-                    ? `<div class="cat-goal small" style="margin-top:8px;padding:8px;border-left:3px solid #999;white-space:pre-wrap;">${escapeHTML(state.config.catGoals[cat])}</div>`
-                    : '' }
               `;
               return `<div class="category ${collapsed?'collapsed':''}" data-cat="${cat}">
                 ${catHead(cat)}
+                ${catGoalHtml}
                 <div class="cat-body">
                   ${bodyHtml}
                 </div>
