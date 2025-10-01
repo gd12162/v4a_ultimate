@@ -10,15 +10,33 @@
   function initState(){
     const s = load();
     if (!s.config) s.config = {};
+
+    // 기존 필드 유지 (구버전 호환)
     if (typeof s.config.coverDataUrl !== 'string') s.config.coverDataUrl = '';
-    if (typeof s.config.todayD !== 'number') s.config.todayD = 0;
-    // 저장 버튼을 누르기 전에는 todayD를 있는 그대로 보여주기 위해 기본 baseDate를 오늘로 둠
-    if (typeof s.config.baseDate !== 'string') s.config.baseDate = new Date().toISOString().slice(0,10);
-    // [ADD] 100일 목표 기본값
+    if (typeof s.config.todayD !== 'number') s.config.todayD = 0; // 구버전 호환
+    if (typeof s.config.baseDate !== 'string') s.config.baseDate = new Date().toISOString().slice(0,10); // 구버전 호환
+
+    // [ADD] D-day 계산의 기준을 고정하기 위한 startDate/startD 도입 + 1회 마이그레이션
+    if (typeof s.config.startDate !== 'string' || typeof s.config.startD !== 'number') {
+      s.config.startDate = s.config.baseDate; // 구버전 기준일 승계
+      s.config.startD = Number(s.config.todayD || 0); // 구버전 D값 승계
+    }
+
+    // [ADD] 100일 목표(전체)
     if (typeof s.config.goal100 !== 'string') s.config.goal100 = '';
+
+    // [ADD] 카테고리별 100일 목표
+    if (typeof s.config.catGoals !== 'object' || !s.config.catGoals) s.config.catGoals = {};
+    CATS.forEach(c => { if (typeof s.config.catGoals[c] !== 'string') s.config.catGoals[c] = '' });
+
     if (!Array.isArray(s.items)) s.items = [];        // {id, cat, type:'sub'|'goal', title, detail?, parentId?, createdAt}
     if (!Array.isArray(s.achievements)) s.achievements = []; // {id, itemId, doneAt, dValue}
     if (typeof s.seq !== 'number') s.seq = 1;
+
+    // [ADD] UI 상태(카테고리 접힘)
+    if (typeof s.ui !== 'object' || !s.ui) s.ui = {};
+    if (typeof s.ui.collapsedCats !== 'object' || !s.ui.collapsedCats) s.ui.collapsedCats = {};
+
     save(s); return s;
   }
   let state = initState();
@@ -98,7 +116,7 @@
     return Math.floor((au - bu)/86400000);
   }
 
-  // === 로컬 날짜 유틸 & 현재 보이는 D 계산 (이미 추가됨) ===
+  // === 로컬 날짜 유틸 & 현재 보이는 D 계산 ===
   function ymdLocal(d = new Date()){
     const y = d.getFullYear(), m = d.getMonth()+1, dd = d.getDate();
     const pad = n => String(n).padStart(2,'0');
@@ -113,11 +131,12 @@
     const db = new Date(b.getFullYear(), b.getMonth(), b.getDate());
     return Math.round((da - db) / 86400000);
   }
+  // [FIX] startDate/startD 기반으로만 계산(자동 리베이스 제거)
   function currentD(){
-    const base = dateFromYmdLocal(state.config.baseDate || ymdLocal());
+    const start = dateFromYmdLocal(state.config.startDate || ymdLocal());
     const today = new Date();
-    const passed = diffDaysLocal(today, base);
-    return Math.max(0, Number(state.config.todayD||0) - passed);
+    const passed = diffDaysLocal(today, start);
+    return Math.max(0, Number(state.config.startD||0) - passed);
   }
 
   // ---------- Data ops ----------
@@ -154,7 +173,17 @@
   }
 
   // ---------- Shared HTML ----------
-  function catHead(cat){ return `<div class="cat-head"><h3 class="cat-title">${cat}</h3></div>`; }
+  // [MOD] 접기/펼치기 토글 버튼 포함
+  function catHead(cat){
+    const collapsed = !!state.ui.collapsedCats[cat];
+    return `
+      <div class="cat-head" data-cat="${cat}">
+        <h3 class="cat-title">${cat}</h3>
+        <button class="mini-btn toggle-cat" data-cat="${cat}">
+          ${collapsed ? '펼치기' : '접기'}
+        </button>
+      </div>`;
+  }
   function subChipHTML(sub){
     return `<div class="chip subtopic" data-sub-id="${sub.id}">
       <span class="badge">소주제</span>
@@ -316,7 +345,7 @@
       ? `style="background-image:url('${state.config.coverDataUrl}');background-size:cover;background-position:center;background-repeat:no-repeat;"`
       : '';
 
-    // [ADD] 100일 목표 카드 (D-박스 아래)
+    // 100일 목표(전체)
     const goal100 = String(state.config.goal100 || '').trim();
     const goal100Box = `
       <div class="card" id="goal100Box">
@@ -336,15 +365,24 @@
         <div class="card">
           <div id="fullTree">
             ${CATS.map(cat=>{
+              const collapsed = !!state.ui.collapsedCats[cat];
               const subs = state.items.filter(x=>x.cat===cat && x.type==='sub');
               const directGoals = state.items.filter(x=>x.cat===cat && x.type==='goal' && !x.parentId);
-              return `<div class="category" data-cat="${cat}">
-                ${catHead(cat)}
+              const bodyHtml = `
                 ${subs.map(st=>{
                   const goalsUnder = state.items.filter(x=>x.cat===cat && x.type==='goal' && x.parentId===st.id);
                   return `${subChipHTML(st)}${goalsUnder.map(g=>goalRowHTML(g,true)).join('')}`;
                 }).join('')}
                 ${directGoals.map(g=>goalRowHTML(g,false)).join('')}
+                ${ (state.config.catGoals[cat] || '').trim()
+                    ? `<div class="cat-goal small" style="margin-top:8px;padding:8px;border-left:3px solid #999;white-space:pre-wrap;">${escapeHTML(state.config.catGoals[cat])}</div>`
+                    : '' }
+              `;
+              return `<div class="category ${collapsed?'collapsed':''}" data-cat="${cat}">
+                ${catHead(cat)}
+                <div class="cat-body">
+                  ${bodyHtml}
+                </div>
               </div>`;
             }).join('')}
           </div>
@@ -375,6 +413,17 @@
       </section>
     `;
     view.innerHTML = html;
+
+    // [ADD] 카테고리 접기/펼치기 이벤트
+    $all('.toggle-cat').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const cat = btn.getAttribute('data-cat');
+        state.ui.collapsedCats[cat] = !state.ui.collapsedCats[cat];
+        save(state);
+        renderHome();
+        nextFrame(()=> focusNewElement(`.category[data-cat="${cat}"] .cat-head`));
+      });
+    });
 
     // subtopic actions
     $all('#fullTree .subtopic').forEach(node=>{
@@ -521,7 +570,7 @@
   }
 
   function renderSettings(){
-    const d = Number(state.config.todayD||0);
+    const dShown = currentD();  // 지금 화면에 보이는 D (미리보기)
     const html = `
       <section class="page page-settings">
         <div class="card">
@@ -533,16 +582,33 @@
             <div class="imgBox">
               <img id="coverPreview" alt="미리보기" style="display:${state.config.coverDataUrl?'block':'none'}">
             </div>
-            <label>오늘 기준 D-값
-              <input id="todayD" type="number" min="0" max="9999" value="${d}">
+
+            <!-- [FIX] '오늘 기준 D-값'이 아닌 '시작 D-값' -->
+            <label>시작 D-값 (리베이스 기준)
+              <input id="startD" type="number" min="0" max="9999" value="${Number(state.config.startD||0)}">
+              <div class="meta small">현재 화면 표시: <strong>D-${dShown}</strong></div>
             </label>
 
-            <!-- [ADD] 이번 100일 목표 작성칸 -->
+            <!-- [ADD] 오늘로 리베이스 -->
+            <div class="actions">
+              <button id="rebaseBtn" class="btn">오늘로 리베이스</button>
+            </div>
+
+            <!-- [ADD] 이번 100일 전체 목표 -->
             <label>이번 100일에 이뤄낼 목표
               <textarea id="goal100Text" class="input" rows="6" placeholder="예: 100일 동안 꾸준히 ○○을 달성하기">
 ${escapeHTML(state.config.goal100 || '')}
               </textarea>
             </label>
+
+            <!-- [ADD] 카테고리별 100일 목표 (4개) -->
+            <div class="divider"></div>
+            <h3>카테고리별 100일 목표</h3>
+            ${CATS.map(c => `
+              <label>${c}
+                <textarea data-cat-goal="${c}" class="input" rows="4" placeholder="${c}에 대한 100일 목표">${escapeHTML(state.config.catGoals[c] || '')}</textarea>
+              </label>
+            `).join('')}
 
             <div class="actions"><button id="saveSettingsBtn" class="btn">저장</button></div>
           </div>
@@ -575,12 +641,30 @@ ${escapeHTML(state.config.goal100 || '')}
       reader.readAsDataURL(f);
     });
 
+    // [ADD] 오늘로 리베이스(기준일만 오늘로, startD는 입력값 유지)
+    $('#rebaseBtn')?.addEventListener('click', ()=>{
+      const inputD = Number(($('#startD')||{}).value || state.config.startD || 0);
+      state.config.startD = inputD;
+      state.config.startDate = ymdLocal(new Date()); // 오늘
+      save(state);
+      toast('기준일을 오늘로 리베이스했습니다.');
+      renderSettings();
+    });
+
+    // [FIX] 저장 로직: 기준일 자동 변경 없음
     $('#saveSettingsBtn')?.addEventListener('click', ()=>{
-      state.config.todayD = Number(($('#todayD')||{}).value || 0);
-      state.config.baseDate = ymdLocal(new Date()); // 로컬 YYYY-MM-DD
-      // [ADD] 100일 목표 저장
+      state.config.startD = Number(($('#startD')||{}).value || state.config.startD || 0);
+
       const ta = $('#goal100Text');
       state.config.goal100 = ta ? String(ta.value || '').trim() : state.config.goal100;
+
+      // 카테고리별 목표 저장
+      const catAreas = $all('textarea[data-cat-goal]');
+      catAreas.forEach(area=>{
+        const cat = area.getAttribute('data-cat-goal');
+        state.config.catGoals[cat] = String(area.value || '').trim();
+      });
+
       save(state);
       toast('설정이 적용되었습니다.');
     });
